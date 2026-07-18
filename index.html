@@ -102,6 +102,10 @@
   }
   .spec-toggle.shadow{background:#3a2a52;border-color:#6b4fa0;color:#d6c4f5;}
   .pool-empty{color:var(--text-dim);font-size:12.5px;font-style:italic;}
+  .reserve-hint{font-size:10.5px;text-transform:uppercase;letter-spacing:1.1px;color:var(--amber);font-weight:600;margin-bottom:6px;}
+  .stag{font-size:9px;font-weight:700;letter-spacing:.5px;border-radius:3px;padding:1px 4px;text-transform:uppercase;}
+  .stag.tentative{background:rgba(232,163,61,.22);color:var(--amber);}
+  .stag.bench{background:rgba(127,168,156,.22);color:var(--text-dim);}
 
   .chip{
     display:inline-flex;align-items:center;gap:6px;
@@ -237,6 +241,10 @@
         <button class="btn-ghost" onclick="autoFill()">Re-run auto-fill</button>
         <button class="btn-ghost" onclick="unassignAll()">Send all back to pool</button>
       </div>
+      <div id="reserveWrap" style="display:none;margin-bottom:12px;">
+        <div class="reserve-hint">Tentative / Bench — drag onto the board to slot them in</div>
+        <div class="roster-pool" id="reservePool"></div>
+      </div>
       <div class="roster-pool" id="rosterPool"><span class="pool-empty">No one loaded yet — paste a roster above.</span></div>
     </div>
 
@@ -361,6 +369,28 @@ const ROLE_FALLBACK = {
   tank:'#8f9ba8'
 };
 
+// Tentative/Bench rows carry a spec tag but no class header, so infer the class
+// from the spec. Ambiguous specs (holy/restoration/protection) pick the most
+// common class; that only matters when no class header is present.
+const SPEC_TO_CLASS = {
+  arms:'warrior', fury:'warrior', protection:'warrior',
+  assassination:'rogue', combat:'rogue', subtlety:'rogue',
+  beastmastery:'hunter', marksmanship:'hunter', survival:'hunter',
+  arcane:'mage', fire:'mage', frost:'mage',
+  affliction:'warlock', demonology:'warlock', destruction:'warlock',
+  discipline:'priest', shadow:'priest', holy:'priest',
+  balance:'druid', feral:'druid', guardian:'druid', restoration:'druid',
+  retribution:'paladin',
+  enhancement:'shaman', elemental:'shaman'
+};
+
+// Non-class section headers and the status they assign.
+const SPECIAL_STATUS = {
+  tentative:'tentative', tentatives:'tentative', late:'tentative',
+  bench:'bench', benched:'bench', standby:'bench',
+  absence:'absence', absent:'absence', declined:'absence', out:'absence'
+};
+
 let roster = [];          // {id, name, cls}
 let counts = { range: 6, healer: 5, chaser: 3 };
 let assignments = { range: [], healer: [], chaser: [] };
@@ -373,6 +403,7 @@ function parseRoster(){
   const found = [];
   const seen = new Set();
   let currentClass = null;
+  let currentStatus = 'active';   // 'active' | 'tentative' | 'bench' | 'absence'
 
   raw.split('\n').forEach(rawLine=>{
     // strip invisible separators and emoji-style tag punctuation
@@ -380,17 +411,29 @@ function parseRoster(){
                       .replace(/\u00a0/g,' ').trim();
     if(!line) return;
 
-    // class header:  ":Priest: Priest (4)"  or  "Priest (4)"
+    // section header:  ":Priest: Priest (4)" / "Priest (4)" / ":Bench: Bench (1) : ..."
     const hdr = line.match(/^(?::[\w+-]+:\s*)?([A-Za-z]+)\s*\(\d+\)\s*(.*)$/);
-    if(hdr && CLASS_NAMES.includes(hdr[1].toLowerCase())){
-      currentClass = hdr[1].toLowerCase();
-      // inline members on the same line (old backtick format)
+    if(hdr){
+      const key = hdr[1].toLowerCase();
       const rest = hdr[2] || '';
-      const re = /`\s*(\d+)\s*`\s*([^`]+)/g;
-      let m;
-      while((m = re.exec(rest)) !== null){
-        addMember(m[2], currentClass, '', parseInt(m[1],10));
+      if(CLASS_NAMES.includes(key)){
+        currentClass = key;
+        currentStatus = 'active';
+        // inline members on the same line (old backtick format)
+        const re = /`\s*(\d+)\s*`\s*([^`]+)/g;
+        let m;
+        while((m = re.exec(rest)) !== null){
+          addMember(m[2], currentClass, '', parseInt(m[1],10), 'active');
+        }
+        return;
       }
+      if(SPECIAL_STATUS[key]){
+        currentClass = null;                       // no class header for these groups
+        currentStatus = SPECIAL_STATUS[key];
+        parseInlineMembers(rest, currentStatus);   // members can trail on the header line
+        return;
+      }
+      // unrecognised header — leave the current section context untouched
       return;
     }
 
@@ -401,14 +444,23 @@ function parseRoster(){
     // member with spec tag:  ":Holy: 3 Youngjoe"
     const mem = line.match(/^:([\w+-]+?)\d*:\s*(\d+)?\s*(.+)$/);
     if(mem && currentClass){
-      addMember(mem[3], currentClass, mem[1].toLowerCase(), mem[2] ? parseInt(mem[2],10) : null);
+      addMember(mem[3], currentClass, mem[1].toLowerCase(), mem[2] ? parseInt(mem[2],10) : null, currentStatus);
+      return;
+    }
+    // spec-tagged rows under a special (non-class) section: infer class from spec
+    if(mem && currentStatus !== 'active'){
+      parseInlineMembers(line, currentStatus);
       return;
     }
 
     // bare "12 Name" under a class header
-    const bare = line.match(/^(\d+)?\s*([A-Za-zÀ-ÿ0-9'’_-]+)$/);
+    const bare = line.match(/^(\d+)?\s*([A-Za-zÀ-ÿ0-9'’_\[\]-]+)$/);
     if(bare && currentClass){
-      addMember(bare[2], currentClass, '', bare[1] ? parseInt(bare[1],10) : null);
+      addMember(bare[2], currentClass, '', bare[1] ? parseInt(bare[1],10) : null, currentStatus);
+      return;
+    }
+    if(bare && currentStatus !== 'active'){
+      parseInlineMembers(line, currentStatus);
       return;
     }
 
@@ -416,12 +468,30 @@ function parseRoster(){
     const parts = stripped.split(/[,\t]+|\s+/).filter(Boolean);
     if(parts.length > 1){
       const last = parts[parts.length-1].toLowerCase();
-      if(CLASS_COLORS[last]) addMember(parts.slice(0,-1).join(' '), last, '', null);
+      if(CLASS_COLORS[last]) addMember(parts.slice(0,-1).join(' '), last, '', null, 'active');
     }
   });
 
-  function addMember(name, cls, spec, num){
-    name = String(name).replace(/[`:]/g,'').trim();
+  // Parse a comma-separated run of members that carry only a spec tag (no class
+  // header), e.g. ":Arcane: 23 TCoody, :Enhancement: 27 [VEGA]" or "10 Easyhealing, ...".
+  function parseInlineMembers(text, status){
+    if(!text) return;
+    text.split(',').forEach(piece=>{
+      // drop a leading separator colon ("... (2) : :Arcane: ...") without eating a :Spec: tag
+      const p = piece.trim().replace(/^:\s+/,'').trim();
+      if(!p) return;
+      const m = p.match(/^(?::([\w+-]+?)\d*:\s*)?(\d+)?\s*(.+)$/);
+      if(!m) return;
+      const spec = m[1] ? m[1].toLowerCase() : '';
+      const cls  = SPEC_TO_CLASS[spec] || '';
+      addMember(m[3], cls, spec, m[2] ? parseInt(m[2],10) : null, status);
+    });
+  }
+
+  function addMember(name, cls, spec, num, status){
+    status = status || 'active';
+    if(status === 'absence') return;   // absent raiders never reach the board
+    name = String(name).replace(/[`:]/g,'').replace(/^\[|\]$/g,'').trim();
     if(!name) return;
     const key = name.toLowerCase();
     if(seen.has(key)) return;
@@ -432,7 +502,8 @@ function parseRoster(){
       cls: CLASS_COLORS[cls] ? cls : '',
       role: cls,
       spec: spec || '',
-      num: (num == null ? null : num)
+      num: (num == null ? null : num),
+      status: status
     });
   }
 
@@ -469,14 +540,16 @@ function isRanged(m){
 }
 
 function autoFill(){
-  const healers = roster.filter(isHealer);
-  const ranged  = roster.filter(isRanged);
+  // Only confirmed raiders are auto-placed; tentative/bench wait in the pool.
+  const active  = roster.filter(m => (m.status || 'active') === 'active');
+  const healers = active.filter(isHealer);
+  const ranged  = active.filter(isRanged);
 
   // chase team: 1 elemental shaman, 1 mage, 1 shadow priest
   // (+1 healer when the raid is running more than 6 healers)
   const chasers = [];
   const takeFirst = pred => {
-    const pick = roster.find(m => !chasers.includes(m.id) && pred(m));
+    const pick = active.find(m => !chasers.includes(m.id) && pred(m));
     if(pick) chasers.push(pick.id);
     return !!pick;
   };
@@ -555,16 +628,15 @@ function chipHTML(member, withClear){
   const clearBtn = '';
   const num = member.num!=null ? `<span class="num">${member.num}</span>` : '';
   const roleTag = member.cls ? member.cls.slice(0,3).toUpperCase() : (member.role ? member.role.slice(0,3).toUpperCase() : '');
+  const status = (member.status && member.status !== 'active')
+    ? `<span class="stag ${member.status}">${member.status === 'tentative' ? 'TENT' : 'BENCH'}</span>` : '';
   return `<span class="chip" draggable="true" data-id="${member.id}" style="--class-color:${color}">
-            ${num}${member.name}${roleTag?`<span class="cls">${roleTag}</span>`:''}${clearBtn}
+            ${num}${member.name}${roleTag?`<span class="cls">${roleTag}</span>`:''}${status}${clearBtn}
           </span>`;
 }
 
-function renderPool(){
-  const used = assignedIds();
-  const pool = roster.filter(m=>!used.has(m.id));
-  const el = document.getElementById('rosterPool');
-  el.innerHTML = pool.length ? pool.map(m=>chipHTML(m,false)).join('') : '<span class="pool-empty">Everyone is assigned. Nice.</span>';
+// Wire drag-out on chips and drop-to-unassign on a pool container.
+function wirePool(el){
   el.querySelectorAll('.chip').forEach(c=>{
     c.addEventListener('dragstart', e=>{
       e.dataTransfer.setData('text/plain', c.dataset.id);
@@ -577,8 +649,30 @@ function renderPool(){
     e.preventDefault();
     el.style.background='';
     const id = e.dataTransfer.getData('text/plain');
-    if(id) unassignId(id);
+    if(id) unassignId(id);   // status is stored on the member, so it returns to the right section
   };
+}
+
+function renderPool(){
+  const used = assignedIds();
+  const avail = roster.filter(m=>!used.has(m.id));
+  const reserve = avail.filter(m => m.status === 'tentative' || m.status === 'bench');
+  const active  = avail.filter(m => !m.status || m.status === 'active');
+
+  const wrap = document.getElementById('reserveWrap');
+  const rEl = document.getElementById('reservePool');
+  if(reserve.length){
+    wrap.style.display = '';
+    rEl.innerHTML = reserve.map(m=>chipHTML(m,false)).join('');
+    wirePool(rEl);
+  } else {
+    wrap.style.display = 'none';
+    rEl.innerHTML = '';
+  }
+
+  const el = document.getElementById('rosterPool');
+  el.innerHTML = active.length ? active.map(m=>chipHTML(m,false)).join('') : '<span class="pool-empty">Everyone is assigned. Nice.</span>';
+  wirePool(el);
 }
 
 function circlePositions(n, cx, cy, rx, ry, startDeg){
