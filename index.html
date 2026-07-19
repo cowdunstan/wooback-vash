@@ -240,13 +240,18 @@
           <span id="rhKeyState" style="float:right;font-weight:600;letter-spacing:.5px;color:var(--text-dim);text-transform:none;font-size:10px;">○ no key stored</span>
         </label>
         <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
-          <input type="text" id="rhEventId" placeholder="Event ID (e.g. 1234567890)"
-                 style="background:#0a1815;border:1px solid var(--panel-line);color:var(--text);border-radius:6px;padding:7px 10px;font-size:13px;font-family:'Inter';width:200px;">
-          <input type="password" id="rhApiKey" autocomplete="off" placeholder="API key — optional, stored locally"
+          <input type="text" id="rhServerId" placeholder="Discord server ID" value="1462481995119722649"
+                 style="background:#0a1815;border:1px solid var(--panel-line);color:var(--text);border-radius:6px;padding:7px 10px;font-size:13px;font-family:'Inter';width:220px;">
+          <input type="password" id="rhApiKey" autocomplete="off" placeholder="API token — required to list events"
                  style="background:#0a1815;border:1px solid var(--panel-line);color:var(--text);border-radius:6px;padding:7px 10px;font-size:13px;font-family:'Inter';width:250px;">
-          <button class="btn-primary" onclick="fetchRaidHelper()">Fetch signups</button>
+          <button class="btn-primary" onclick="loadServerEvents()">Load events</button>
           <button class="btn-ghost" onclick="saveApiKey()">Save key</button>
           <button class="btn-ghost" onclick="clearApiKey()">Clear key</button>
+        </div>
+        <div id="rhEventPickRow" style="display:none;flex-wrap:wrap;gap:8px;align-items:center;margin-top:8px;">
+          <select id="rhEventSelect" onchange="loadSelectedEvent()"
+                  style="background:#0a1815;border:1px solid var(--panel-line);color:var(--text);border-radius:6px;padding:7px 10px;font-size:13px;font-family:'Inter';min-width:340px;flex:1;"></select>
+          <button class="btn-ghost" onclick="loadSelectedEvent()">Load selected</button>
         </div>
         <input type="text" id="rhProxy" autocomplete="off" placeholder="CORS proxy base URL — required when this page is hosted (e.g. https://rh-proxy.you.workers.dev)"
                style="background:#0a1815;border:1px solid var(--panel-line);color:var(--text);border-radius:6px;padding:7px 10px;font-size:13px;font-family:'Inter';width:100%;margin-top:8px;">
@@ -873,14 +878,16 @@ function exportImage(){
 }
 
 /* ───────────────────────── Raid-Helper API integration ─────────────────────────
-   The key is your OWN Raid-Helper server API key (from the /apikey Discord command).
-   It is stored only in this browser's localStorage, is never sent anywhere except to
-   raid-helper.xyz when you press "Fetch signups", and can be wiped with "Clear key".
-   Anyone able to run JS in this page could read it — that's unavoidable on a static
-   page with no backend — so treat it as a per-browser convenience, not a secret vault. */
-const RH_KEY_STORE   = 'wooback.raidhelper.apikey';
-const RH_EVENT_STORE = 'wooback.raidhelper.eventid';
-const RH_PROXY_STORE = 'wooback.raidhelper.proxy';
+   Enter your Discord server ID + a Raid-Helper API token (from the /apikey command
+   in your server) and press "Load events" to list that server's events, then pick
+   one to pull its signups onto the board. The token is stored only in this browser's
+   localStorage, is sent solely to raid-helper.xyz (via your proxy) on request, and
+   can be wiped with "Clear key". Anyone able to run JS in this page could read it —
+   unavoidable on a static page with no backend — so treat it as a per-browser
+   convenience, not a secret vault. */
+const RH_KEY_STORE    = 'wooback.raidhelper.apikey';
+const RH_SERVER_STORE = 'wooback.raidhelper.serverid';
+const RH_PROXY_STORE  = 'wooback.raidhelper.proxy';
 
 // Base for API calls. Raid-Helper rejects cross-origin browser requests, so on a
 // hosted page you must route through your own CORS proxy (see raidhelper-proxy.worker.js).
@@ -917,8 +924,8 @@ function loadApiKeyUI(){
   try {
     const k = localStorage.getItem(RH_KEY_STORE);
     if(k) document.getElementById('rhApiKey').value = k;
-    const e = localStorage.getItem(RH_EVENT_STORE);
-    if(e) document.getElementById('rhEventId').value = e;
+    const s = localStorage.getItem(RH_SERVER_STORE);
+    if(s) document.getElementById('rhServerId').value = s;
     const p = localStorage.getItem(RH_PROXY_STORE);
     if(p) document.getElementById('rhProxy').value = p;
   } catch(err){}
@@ -975,35 +982,110 @@ function mapRaidHelperSignups(signups){
   return out;
 }
 
-async function fetchRaidHelper(){
-  const eventId = document.getElementById('rhEventId').value.trim();
-  if(!eventId){ setRhStatus('Enter a Raid-Helper event ID first.', true); return; }
+// Persist the proxy field before any network call (it's not secret, unlike the key).
+function persistProxy(){
   const proxy = document.getElementById('rhProxy').value.trim();
   try {
-    localStorage.setItem(RH_EVENT_STORE, eventId);
     if(proxy) localStorage.setItem(RH_PROXY_STORE, proxy);
     else localStorage.removeItem(RH_PROXY_STORE);
   } catch(err){}
+}
 
+// Friendly hint for a failed fetch — the usual culprit is CORS / a missing proxy.
+function rhNetworkHint(){
+  return document.getElementById('rhProxy').value.trim()
+    ? 'Proxy unreachable — check the proxy URL is deployed and allows this origin.'
+    : 'Blocked by CORS — set a proxy URL above (see raidhelper-proxy.worker.js).';
+}
+
+// Human-readable date for an event, for the picker labels.
+function fmtEventDate(ev){
+  const t = Number(ev.startTime || ev.startTimestamp || 0);
+  if(t){
+    const d = new Date(t * 1000);
+    if(!isNaN(d.getTime())){
+      return d.toLocaleDateString(undefined, { month:'short', day:'numeric' }) +
+             ' ' + d.toLocaleTimeString(undefined, { hour:'2-digit', minute:'2-digit' });
+    }
+  }
+  return [ev.date, ev.time].filter(Boolean).join(' ');
+}
+
+// List every event on a server (requires the API token) and fill the picker.
+async function loadServerEvents(){
+  const serverId = document.getElementById('rhServerId').value.trim();
   const key = document.getElementById('rhApiKey').value.trim();
-  setRhStatus('Fetching…');
+  if(!serverId){ setRhStatus('Enter a Discord server ID first.', true); return; }
+  if(!key){ setRhStatus('An API token is required to list a server’s events.', true); return; }
+  try { localStorage.setItem(RH_SERVER_STORE, serverId); } catch(err){}
+  persistProxy();
+  setRhStatus('Loading events…');
+
+  let data;
+  try {
+    const res = await fetch(`${rhApiBase()}/v4/servers/${encodeURIComponent(serverId)}/events`, {
+      headers: { 'Authorization': key }
+    });
+    if(res.status === 401 || res.status === 403){ setRhStatus('Unauthorized — check the API token belongs to this server.', true); return; }
+    if(res.status === 404){ setRhStatus('Server not found — double-check the server ID.', true); return; }
+    if(!res.ok){ setRhStatus('Raid-Helper returned HTTP ' + res.status + '.', true); return; }
+    data = await res.json();
+  } catch(err){
+    setRhStatus(rhNetworkHint() + ' See the browser console.', true);
+    console.error('Raid-Helper server-events fetch failed:', err);
+    return;
+  }
+
+  // Field name for the events array isn't verified against a live token — log the
+  // raw response so an unexpected shape is easy to diagnose from the console.
+  console.debug('Raid-Helper server-events response:', data);
+  const events = data.postedEvents || data.events || data.scheduledEvents ||
+                 (Array.isArray(data) ? data : []);
+  const sel = document.getElementById('rhEventSelect');
+  const row = document.getElementById('rhEventPickRow');
+  if(!events.length){
+    row.style.display = 'none';
+    setRhStatus('No events found on that server.', true);
+    return;
+  }
+  events.sort((a,b)=> Number(a.startTime || 0) - Number(b.startTime || 0));
+  sel.innerHTML = events.map(ev=>{
+    const id = ev.id || ev.eventId || '';
+    const when = fmtEventDate(ev);
+    const title = String(ev.title || 'Untitled event').replace(/</g,'&lt;');
+    return `<option value="${id}">${when ? when + ' — ' : ''}${title}</option>`;
+  }).join('');
+  row.style.display = 'flex';
+  setRhStatus(`Found ${events.length} event${events.length===1?'':'s'} — pick one to load its signups.`);
+}
+
+// Load the signups for whichever event is chosen in the picker.
+function loadSelectedEvent(){
+  const sel = document.getElementById('rhEventSelect');
+  const id = sel && sel.value;
+  if(!id){ setRhStatus('No event selected.', true); return; }
+  fetchEventById(id);
+}
+
+// Fetch one event's signups and drop them onto the board.
+async function fetchEventById(eventId){
+  if(!eventId){ setRhStatus('No event id given.', true); return; }
+  persistProxy();
+  const key = document.getElementById('rhApiKey').value.trim();
+  setRhStatus('Loading signups…');
 
   let data;
   try {
     const res = await fetch(`${rhApiBase()}/v4/events/${encodeURIComponent(eventId)}`, {
       headers: key ? { 'Authorization': key } : {}
     });
-    if(res.status === 401 || res.status === 403){
-      setRhStatus('Unauthorized — check your API key (required for private events).', true); return;
-    }
-    if(res.status === 404){ setRhStatus('Event not found — double-check the event ID.', true); return; }
-    if(!res.ok){ setRhStatus('Raid-Helper returned HTTP '+res.status+'.', true); return; }
+    if(res.status === 401 || res.status === 403){ setRhStatus('Unauthorized — check your API token.', true); return; }
+    if(res.status === 404){ setRhStatus('Event not found (it may have been deleted).', true); return; }
+    if(!res.ok){ setRhStatus('Raid-Helper returned HTTP ' + res.status + '.', true); return; }
     data = await res.json();
   } catch(err){
-    const hint = proxy ? 'Proxy unreachable — check the proxy URL is deployed and allows this origin.'
-                       : 'Blocked by CORS — set a proxy URL above (see raidhelper-proxy.worker.js).';
-    setRhStatus(hint + ' See the browser console.', true);
-    console.error('Raid-Helper fetch failed:', err);
+    setRhStatus(rhNetworkHint() + ' See the browser console.', true);
+    console.error('Raid-Helper event fetch failed:', err);
     return;
   }
 
