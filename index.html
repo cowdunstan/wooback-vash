@@ -237,16 +237,10 @@
       <div class="api-block">
         <label style="font-size:10.5px;text-transform:uppercase;letter-spacing:1.2px;color:var(--text-dim);font-weight:600;display:block;margin-bottom:8px;">
           Import from Raid-Helper
-          <span id="rhKeyState" style="float:right;font-weight:600;letter-spacing:.5px;color:var(--text-dim);text-transform:none;font-size:10px;">○ no key stored</span>
         </label>
         <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
-          <input type="text" id="rhServerId" placeholder="Discord server ID" value="1462481995119722649"
-                 style="background:#0a1815;border:1px solid var(--panel-line);color:var(--text);border-radius:6px;padding:7px 10px;font-size:13px;font-family:'Inter';width:220px;">
-          <input type="password" id="rhApiKey" autocomplete="off" placeholder="API token — required to list events"
-                 style="background:#0a1815;border:1px solid var(--panel-line);color:var(--text);border-radius:6px;padding:7px 10px;font-size:13px;font-family:'Inter';width:250px;">
           <button class="btn-primary" onclick="loadServerEvents()">Load events</button>
-          <button class="btn-ghost" onclick="saveApiKey()">Save key</button>
-          <button class="btn-ghost" onclick="clearApiKey()">Clear key</button>
+          <span style="font-size:11px;color:var(--text-dim);">Pulls this server's events via the proxy (token lives in the Worker).</span>
         </div>
         <div id="rhEventPickRow" style="display:none;flex-wrap:wrap;gap:8px;align-items:center;margin-top:8px;">
           <select id="rhEventSelect" onchange="loadSelectedEvent()"
@@ -873,19 +867,17 @@ function exportImage(){
 }
 
 /* ───────────────────────── Raid-Helper API integration ─────────────────────────
-   Enter your Discord server ID + a Raid-Helper API token (from the /apikey command
-   in your server) and press "Load events" to list that server's events, then pick
-   one to pull its signups onto the board. The token is stored only in this browser's
-   localStorage, is sent solely to raid-helper.xyz (via your proxy) on request, and
-   can be wiped with "Clear key". Anyone able to run JS in this page could read it —
-   unavoidable on a static page with no backend — so treat it as a per-browser
-   convenience, not a secret vault. */
-const RH_KEY_STORE    = 'wooback.raidhelper.apikey';
-const RH_SERVER_STORE = 'wooback.raidhelper.serverid';
+   Press "Load events" to list this server's events, then pick one to pull its
+   signups onto the board. There is no token in this page: the Raid-Helper API
+   token is stored as a secret on the proxy Worker (RH_TOKEN — see
+   raidhelper-proxy.worker.js), which attaches it server-side. The server ID is
+   fixed below, so nothing needs to be entered here. */
+const RH_SERVER_ID = '1462481995119722649';
 
 // Raid-Helper rejects cross-origin browser requests, so every call routes through
 // our own CORS proxy Worker (see raidhelper-proxy.worker.js), which forwards the
-// path unchanged to https://raid-helper.xyz/api and adds the CORS header back.
+// path unchanged to https://raid-helper.xyz/api, adds the token, and returns the
+// CORS header the browser needs.
 const RH_PROXY = 'https://wooback-vash.cowdunstan.workers.dev';
 function rhApiBase(){ return RH_PROXY; }
 
@@ -900,42 +892,6 @@ function setRhStatus(msg, isErr){
   const el = document.getElementById('rhStatus');
   el.textContent = msg || '';
   el.style.color = isErr ? 'var(--amber)' : 'var(--text-dim)';
-}
-
-function reflectKeyState(){
-  let has = false;
-  try { has = !!localStorage.getItem(RH_KEY_STORE); } catch(err){}
-  const el = document.getElementById('rhKeyState');
-  if(el) el.textContent = has ? '● key stored' : '○ no key stored';
-}
-
-function loadApiKeyUI(){
-  try {
-    const k = localStorage.getItem(RH_KEY_STORE);
-    if(k) document.getElementById('rhApiKey').value = k;
-    const s = localStorage.getItem(RH_SERVER_STORE);
-    if(s) document.getElementById('rhServerId').value = s;
-  } catch(err){}
-  reflectKeyState();
-}
-
-function saveApiKey(){
-  const k = document.getElementById('rhApiKey').value.trim();
-  try {
-    if(k) localStorage.setItem(RH_KEY_STORE, k);
-    else  localStorage.removeItem(RH_KEY_STORE);
-  } catch(err){
-    setRhStatus('Could not access localStorage (private mode?).', true); return;
-  }
-  setRhStatus(k ? 'Key saved to this browser.' : 'No key entered — nothing saved.');
-  reflectKeyState();
-}
-
-function clearApiKey(){
-  document.getElementById('rhApiKey').value = '';
-  try { localStorage.removeItem(RH_KEY_STORE); } catch(err){}
-  setRhStatus('Key cleared from this browser.');
-  reflectKeyState();
 }
 
 // Turn Raid-Helper signups into the internal roster shape used by the board.
@@ -988,22 +944,16 @@ function fmtEventDate(ev){
   return [ev.date, ev.time].filter(Boolean).join(' ');
 }
 
-// List every event on a server (requires the API token) and fill the picker.
+// List every event on the server (the proxy Worker supplies the token) and fill
+// the picker.
 async function loadServerEvents(){
-  const serverId = document.getElementById('rhServerId').value.trim();
-  const key = document.getElementById('rhApiKey').value.trim();
-  if(!serverId){ setRhStatus('Enter a Discord server ID first.', true); return; }
-  if(!key){ setRhStatus('An API token is required to list a server’s events.', true); return; }
-  try { localStorage.setItem(RH_SERVER_STORE, serverId); } catch(err){}
   setRhStatus('Loading events…');
 
   let data;
   try {
-    const res = await fetch(`${rhApiBase()}/v4/servers/${encodeURIComponent(serverId)}/events`, {
-      headers: { 'Authorization': key }
-    });
-    if(res.status === 401 || res.status === 403){ setRhStatus('Unauthorized — check the API token belongs to this server.', true); return; }
-    if(res.status === 404){ setRhStatus('Server not found — double-check the server ID.', true); return; }
+    const res = await fetch(`${rhApiBase()}/v4/servers/${encodeURIComponent(RH_SERVER_ID)}/events`);
+    if(res.status === 401 || res.status === 403){ setRhStatus('Unauthorized — set the RH_TOKEN secret on the proxy Worker.', true); return; }
+    if(res.status === 404){ setRhStatus('Server not found — check RH_SERVER_ID.', true); return; }
     if(!res.ok){ setRhStatus('Raid-Helper returned HTTP ' + res.status + '.', true); return; }
     data = await res.json();
   } catch(err){
@@ -1046,15 +996,12 @@ function loadSelectedEvent(){
 // Fetch one event's signups and drop them onto the board.
 async function fetchEventById(eventId){
   if(!eventId){ setRhStatus('No event id given.', true); return; }
-  const key = document.getElementById('rhApiKey').value.trim();
   setRhStatus('Loading signups…');
 
   let data;
   try {
-    const res = await fetch(`${rhApiBase()}/v4/events/${encodeURIComponent(eventId)}`, {
-      headers: key ? { 'Authorization': key } : {}
-    });
-    if(res.status === 401 || res.status === 403){ setRhStatus('Unauthorized — check your API token.', true); return; }
+    const res = await fetch(`${rhApiBase()}/v4/events/${encodeURIComponent(eventId)}`);
+    if(res.status === 401 || res.status === 403){ setRhStatus('Unauthorized — set the RH_TOKEN secret on the proxy Worker.', true); return; }
     if(res.status === 404){ setRhStatus('Event not found (it may have been deleted).', true); return; }
     if(!res.ok){ setRhStatus('Raid-Helper returned HTTP ' + res.status + '.', true); return; }
     data = await res.json();
@@ -1074,6 +1021,5 @@ async function fetchEventById(eventId){
   setRhStatus(`Loaded ${members.length} signups from “${data.title || 'event ' + eventId}”.`);
 }
 
-loadApiKeyUI();
 renderAll();
 </script>
