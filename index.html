@@ -886,7 +886,10 @@ const RH_PROXY_STORE = 'wooback.raidhelper.proxy';
 // hosted page you must route through your own CORS proxy (see raidhelper-proxy.worker.js).
 // The proxy forwards the path unchanged, so both branches use the same /vN/... suffix.
 function rhApiBase(){
-  const proxy = (document.getElementById('rhProxy').value || '').trim().replace(/\/+$/,'');
+  let proxy = (document.getElementById('rhProxy').value || '').trim().replace(/\/+$/,'');
+  // A bare host (no scheme) would be treated as a relative path and glued onto
+  // the page's URL, so normalise it to an absolute https:// URL.
+  if(proxy && !/^https?:\/\//i.test(proxy)) proxy = 'https://' + proxy;
   return proxy || 'https://raid-helper.xyz/api';
 }
 
