@@ -1,17 +1,21 @@
 # wooback-vash
 
-A Lady Vashj (Phase 2) raid-assignment board, gated behind **officer** access on
-the wooback Discord server.
+Guild tools for the wooback Discord server, gated behind Discord access in **two
+tiers**: a **home** hub open to any member with the home role, and the Lady Vashj
+(Phase 2) raid-assignment **board** reserved for **officers**.
 
 - **`index.html`** — public landing page. "Sign in with Discord" only.
-- **`board.html`** — the assignment board (was `index.html`). Only reachable with a
-  valid officer session; `app.js` + `styles.css` power it.
+- **`home.html`** — the default page after sign-in: a welcome hub with a hamburger
+  menu (Home / Vash assignments) and app cards. Open to any signed-in tier.
+- **`board.html`** — the assignment board. Only reachable with a valid **officer**
+  session; `app.js` + `styles.css` power it.
+- **`menu.js`** — shared session helpers + hamburger menu, used by both pages.
 - **`raidhelper-proxy.worker.js`** — Cloudflare Worker doing two jobs:
-  1. Discord OAuth (`/auth/login`, `/auth/callback`) — verifies the signed-in user
-     holds an officer role in the guild, then issues a short-lived HMAC-signed
-     session token.
-  2. Raid-Helper CORS proxy — every proxied call now requires that session token,
-     so roster data is never returned to non-officers.
+  1. Discord OAuth (`/auth/login`, `/auth/callback`) — verifies the signed-in
+     user's guild roles and issues a short-lived HMAC-signed session token whose
+     `officer` flag records their tier.
+  2. Raid-Helper CORS proxy — every proxied call requires an **officer** session
+     token, so roster data is never returned to non-officers.
 
 ## How the gate works
 
@@ -19,14 +23,19 @@ the wooback Discord server.
 2. The Worker redirects to Discord (`identify guilds.members.read` scope — no bot
    needed), then Discord calls back to `<worker>/auth/callback`.
 3. The Worker reads the user's roles in the guild via
-   `/users/@me/guilds/{guild}/member`. If they hold one of `OFFICER_ROLE_IDS`, it
-   mints a signed session and redirects to `board.html#session=…`; otherwise it
-   redirects back to the landing page with a "not an officer" message.
-4. `board.html` stores the session and attaches it to every Raid-Helper request.
-   The Worker rejects any Raid-Helper call without a valid session (`401`).
+   `/users/@me/guilds/{guild}/member`:
+   - holds an `OFFICER_ROLE_IDS` role → officer session (`officer: true`);
+   - holds `HOME_ROLE_ID` (or is an officer) → home session (`officer: false`);
+   - neither → redirected back to the landing page with a "no access" message.
+   On success it mints a signed session and redirects to `home.html#session=…`.
+4. The pages store the session; `board.html` attaches it to every Raid-Helper
+   request. The Worker rejects Raid-Helper calls with no session (`401`) or a
+   non-officer session (`403`).
 
-The client-side check in `board.html` only decides whether to *show* the board;
-the real enforcement is the Worker refusing data without a valid signature.
+The client-side checks (home requires a valid session; the board additionally
+requires the `officer` flag and hides the Vash menu item / card otherwise) only
+decide what to *show*; the real enforcement is the Worker refusing data without a
+valid officer signature.
 
 ## One-time setup
 
@@ -43,6 +52,7 @@ the real enforcement is the Worker refusing data without a valid signature.
 - `DISCORD_CLIENT_ID` — from step 1.
 - `GUILD_ID` — `1462481995119722649` (same as the Raid-Helper server ID).
 - `OFFICER_ROLE_IDS` — the three officer role IDs (already filled in).
+- `HOME_ROLE_ID` — the broader role that unlocks the home page (already filled in).
 - `WORKER_BASE` — this Worker's public URL.
 - `APP_BASE` — where GitHub Pages serves the site (currently
   `https://cowdunstan.github.io/wooback-vash`). **Confirm this matches your Pages

@@ -1,29 +1,32 @@
 <meta charset="utf-8">
 <script>
 /* Officer gate. Runs before anything renders: captures a session handed back by
-   the auth Worker (board.html#session=…), and bounces to the landing page if
-   there is no unexpired session. The signature is enforced server-side on every
-   API call; this client check only decides whether to show the board at all. */
+   the auth Worker (board.html#session=…). Bounces to the landing page if there
+   is no unexpired session, or to the home page if the session isn't an officer
+   one. The signature is enforced server-side on every API call; these client
+   checks only decide whether to show the board at all. */
 (function(){
   var m = location.hash.match(/(?:^#|&)session=([^&]+)/);
   if(m){
     try{ localStorage.setItem('vashj_session', decodeURIComponent(m[1])); }catch(e){}
     history.replaceState(null, '', location.pathname + location.search);
   }
-  function valid(tok){
-    if(!tok) return false;
+  function payload(tok){
+    if(!tok) return null;
     try{
       var p = tok.split('.')[0].replace(/-/g,'+').replace(/_/g,'/');
       while(p.length % 4) p += '=';
-      var payload = JSON.parse(atob(p));
-      return payload.exp && payload.exp > Math.floor(Date.now()/1000);
-    }catch(e){ return false; }
+      return JSON.parse(atob(p));
+    }catch(e){ return null; }
   }
   var tok = null;
   try{ tok = localStorage.getItem('vashj_session'); }catch(e){}
-  if(!valid(tok)){
+  var pl = payload(tok);
+  if(!pl || !pl.exp || pl.exp <= Math.floor(Date.now()/1000)){
     try{ localStorage.removeItem('vashj_session'); }catch(e){}
     location.replace('index.html');
+  } else if(!pl.officer){
+    location.replace('home.html');
   }
 })();
 </script>
@@ -35,7 +38,18 @@
 <div class="app">
   <div class="wrap">
     <div class="authbar">
-      <span class="eyebrow">Serpentshrine Cavern</span>
+      <span class="authbar-left">
+        <div class="nav">
+          <button class="hamburger" id="navToggle" aria-label="Menu" aria-expanded="false" aria-controls="navDrawer">
+            <span></span><span></span><span></span>
+          </button>
+          <nav class="nav-drawer" id="navDrawer">
+            <a href="home.html">Home</a>
+            <a href="board.html" class="active" data-officer-only>Vash assignments</a>
+          </nav>
+        </div>
+        <span class="eyebrow">Serpentshrine Cavern</span>
+      </span>
       <span class="authbar-right">
         <span id="authWho" class="auth-who"></span>
         <button class="btn-ghost" onclick="logout()">Sign out</button>
@@ -221,4 +235,5 @@
   </div>
 </div>
 
+<script src="menu.js"></script>
 <script src="app.js"></script>

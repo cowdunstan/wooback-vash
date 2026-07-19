@@ -1,0 +1,71 @@
+<meta charset="utf-8">
+<script>
+/* Access gate. Runs before anything renders: captures a session handed back by
+   the auth Worker (home.html#session=…), and bounces to the landing page if
+   there is no unexpired session. Home is open to any signed-in tier; the Worker
+   only ever issues a session to home-role or officer holders. */
+(function(){
+  var m = location.hash.match(/(?:^#|&)session=([^&]+)/);
+  if(m){
+    try{ localStorage.setItem('vashj_session', decodeURIComponent(m[1])); }catch(e){}
+    history.replaceState(null, '', location.pathname + location.search);
+  }
+  function valid(tok){
+    if(!tok) return false;
+    try{
+      var p = tok.split('.')[0].replace(/-/g,'+').replace(/_/g,'/');
+      while(p.length % 4) p += '=';
+      var payload = JSON.parse(atob(p));
+      return payload.exp && payload.exp > Math.floor(Date.now()/1000);
+    }catch(e){ return false; }
+  }
+  var tok = null;
+  try{ tok = localStorage.getItem('vashj_session'); }catch(e){}
+  if(!valid(tok)){
+    try{ localStorage.removeItem('vashj_session'); }catch(e){}
+    location.replace('index.html');
+  }
+})();
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+
+<div class="app">
+  <div class="wrap">
+    <div class="topbar">
+      <div class="nav">
+        <button class="hamburger" id="navToggle" aria-label="Menu" aria-expanded="false" aria-controls="navDrawer">
+          <span></span><span></span><span></span>
+        </button>
+        <nav class="nav-drawer" id="navDrawer">
+          <a href="home.html" class="active">Home</a>
+          <a href="board.html" data-officer-only>Vash assignments</a>
+        </nav>
+      </div>
+      <span class="topbar-right">
+        <span id="authWho" class="auth-who"></span>
+        <button class="btn-ghost" onclick="logout()">Sign out</button>
+      </span>
+    </div>
+
+    <div class="home-hero">
+      <span class="eyebrow">Guild Tools</span>
+      <h1>wooback</h1>
+      <p class="subtitle">Welcome back. Pick an app to get started.</p>
+    </div>
+
+    <div class="app-cards">
+      <a class="app-card" href="board.html" data-officer-only>
+        <span class="app-card-tag">Officers</span>
+        <h2>Vash assignments</h2>
+        <p>Build and export Lady Vashj — Phase 2 range / healer / chaser assignments, with Raid-Helper import.</p>
+        <span class="app-card-go">Open →</span>
+      </a>
+    </div>
+
+    <footer>wooback guild tools — signed in with Discord.</footer>
+  </div>
+</div>
+
+<script src="menu.js"></script>

@@ -45,7 +45,9 @@
     var msg = document.getElementById('msg');
     if(params.has('denied')){
       var why = params.get('denied');
-      msg.textContent = why === 'not_officer'
+      msg.textContent = why === 'no_access'
+        ? 'That Discord account doesn’t have access to wooback tools.'
+        : why === 'not_officer'
         ? 'That Discord account isn’t an officer on the server.'
         : why === 'not_in_server'
         ? 'That Discord account isn’t a member of the wooback server.'
@@ -58,8 +60,8 @@
     if(location.hash) history.replaceState(null, '', location.pathname);
   })();
 
-  // Already signed in? Skip straight to the board.
+  // Already signed in? Skip straight to the home page.
   try{
-    if(validSession(localStorage.getItem('vashj_session'))) location.replace('board.html');
+    if(validSession(localStorage.getItem('vashj_session'))) location.replace('home.html');
   }catch(e){}
 </script>
