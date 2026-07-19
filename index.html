@@ -875,7 +875,7 @@ function exportImage(){
 /* ───────────────────────── Raid-Helper API integration ─────────────────────────
    The key is your OWN Raid-Helper server API key (from the /apikey Discord command).
    It is stored only in this browser's localStorage, is never sent anywhere except to
-   raid-helper.dev when you press "Fetch signups", and can be wiped with "Clear key".
+   raid-helper.xyz when you press "Fetch signups", and can be wiped with "Clear key".
    Anyone able to run JS in this page could read it — that's unavoidable on a static
    page with no backend — so treat it as a per-browser convenience, not a secret vault. */
 const RH_KEY_STORE   = 'wooback.raidhelper.apikey';
@@ -887,7 +887,7 @@ const RH_PROXY_STORE = 'wooback.raidhelper.proxy';
 // The proxy forwards the path unchanged, so both branches use the same /vN/... suffix.
 function rhApiBase(){
   const proxy = (document.getElementById('rhProxy').value || '').trim().replace(/\/+$/,'');
-  return proxy || 'https://raid-helper.dev/api';
+  return proxy || 'https://raid-helper.xyz/api';
 }
 
 // Raid-Helper signup buttons that represent a status rather than a class.
@@ -987,7 +987,7 @@ async function fetchRaidHelper(){
 
   let data;
   try {
-    const res = await fetch(`${rhApiBase()}/v2/events/${encodeURIComponent(eventId)}`, {
+    const res = await fetch(`${rhApiBase()}/v4/events/${encodeURIComponent(eventId)}`, {
       headers: key ? { 'Authorization': key } : {}
     });
     if(res.status === 401 || res.status === 403){

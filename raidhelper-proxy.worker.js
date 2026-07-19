@@ -1,7 +1,7 @@
 /*
  * Raid-Helper CORS proxy — Cloudflare Worker
  * ------------------------------------------
- * The Vashj board (index.html) runs in the browser, but raid-helper.dev only
+ * The Vashj board (index.html) runs in the browser, but raid-helper.xyz only
  * allows cross-origin requests from its own site, so a hosted page (e.g. GitHub
  * Pages) is blocked by CORS. This Worker calls Raid-Helper server-side (where
  * CORS does not apply) and re-sends the response with a header the browser
@@ -18,7 +18,7 @@
  * Alternatively deploy with Wrangler:  npx wrangler deploy raidhelper-proxy.worker.js
  */
 
-const RAID_HELPER    = 'https://raid-helper.dev/api';
+const RAID_HELPER    = 'https://raid-helper.xyz/api';
 // Lock this to your page's origin so the Worker can't be reused as an open proxy.
 // Use '*' only for quick local testing — never with a real API key.
 const ALLOWED_ORIGIN = 'https://cowdunstan.github.io';
@@ -44,7 +44,7 @@ export default {
     }
 
     const url = new URL(request.url);
-    // Forward the path as-is: /v2/events/123  ->  https://raid-helper.dev/api/v2/events/123
+    // Forward the path as-is: /v4/events/123  ->  https://raid-helper.xyz/api/v4/events/123
     const target = RAID_HELPER + url.pathname + url.search;
 
     const fwd = {};
