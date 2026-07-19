@@ -234,7 +234,24 @@
     </div>
 
     <div class="roster-panel">
-      <label style="font-size:10.5px;text-transform:uppercase;letter-spacing:1.2px;color:var(--text-dim);font-weight:600;display:block;margin-bottom:6px;">Paste roster — supports raid-helper style lists or plain "Name Class" lines</label>
+      <div class="api-block">
+        <label style="font-size:10.5px;text-transform:uppercase;letter-spacing:1.2px;color:var(--text-dim);font-weight:600;display:block;margin-bottom:8px;">
+          Import from Raid-Helper
+          <span id="rhKeyState" style="float:right;font-weight:600;letter-spacing:.5px;color:var(--text-dim);text-transform:none;font-size:10px;">○ no key stored</span>
+        </label>
+        <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
+          <input type="text" id="rhEventId" placeholder="Event ID (e.g. 1234567890)"
+                 style="background:#0a1815;border:1px solid var(--panel-line);color:var(--text);border-radius:6px;padding:7px 10px;font-size:13px;font-family:'Inter';width:200px;">
+          <input type="password" id="rhApiKey" autocomplete="off" placeholder="API key — optional, stored locally"
+                 style="background:#0a1815;border:1px solid var(--panel-line);color:var(--text);border-radius:6px;padding:7px 10px;font-size:13px;font-family:'Inter';width:250px;">
+          <button class="btn-primary" onclick="fetchRaidHelper()">Fetch signups</button>
+          <button class="btn-ghost" onclick="saveApiKey()">Save key</button>
+          <button class="btn-ghost" onclick="clearApiKey()">Clear key</button>
+        </div>
+        <div id="rhStatus" style="font-size:11.5px;color:var(--text-dim);margin-top:7px;min-height:15px;"></div>
+        <div style="border-top:1px solid var(--panel-line);margin:14px 0 12px;"></div>
+      </div>
+      <label style="font-size:10.5px;text-transform:uppercase;letter-spacing:1.2px;color:var(--text-dim);font-weight:600;display:block;margin-bottom:6px;">Or paste roster — supports raid-helper style lists or plain "Name Class" lines</label>
       <textarea id="rosterInput" placeholder="Tank (2)  `1` Tero  `10` Gravycannon&#10;Warrior (3)  `13` Chankles  `25` Sammyp  `22` Tyno&#10;Priest (4)  `7` Nightbrew  `3` Youngjoe ..."></textarea>
       <div style="display:flex;gap:8px;margin-bottom:10px;">
         <button class="btn-primary" onclick="parseRoster()">Load roster</button>
@@ -696,9 +713,13 @@ function segmentPositions(n, cx, cy, r){
   // share the raiders between arcs in proportion to their length
   const counts = spans.map(s => Math.max(1, Math.round(n * s / total)));
   let drift = n - counts.reduce((s,v)=>s+v, 0);
+  // When n is small every arc can already be at its floor of 1, leaving a negative
+  // drift that can never be corrected — bail out then instead of spinning forever.
+  // (Extra positions are harmless: renderSlotGroup only reads as many as it needs.)
   for(let i=0; drift !== 0; i=(i+1)%counts.length){
     if(drift > 0){ counts[i]++; drift--; }
     else if(counts[i] > 1){ counts[i]--; drift++; }
+    else if(!counts.some(c => c > 1)) break;
   }
 
   const pts = [];
@@ -846,5 +867,130 @@ function exportImage(){
   });
 }
 
+/* ───────────────────────── Raid-Helper API integration ─────────────────────────
+   The key is your OWN Raid-Helper server API key (from the /apikey Discord command).
+   It is stored only in this browser's localStorage, is never sent anywhere except to
+   raid-helper.dev when you press "Fetch signups", and can be wiped with "Clear key".
+   Anyone able to run JS in this page could read it — that's unavoidable on a static
+   page with no backend — so treat it as a per-browser convenience, not a secret vault. */
+const RH_KEY_STORE   = 'wooback.raidhelper.apikey';
+const RH_EVENT_STORE = 'wooback.raidhelper.eventid';
+
+// Raid-Helper signup buttons that represent a status rather than a class.
+const RH_STATUS_MAP = {
+  bench:'bench', standby:'bench',
+  tentative:'tentative', late:'tentative',
+  absence:'absence', absent:'absence', declined:'absence'
+};
+
+function setRhStatus(msg, isErr){
+  const el = document.getElementById('rhStatus');
+  el.textContent = msg || '';
+  el.style.color = isErr ? 'var(--amber)' : 'var(--text-dim)';
+}
+
+function reflectKeyState(){
+  let has = false;
+  try { has = !!localStorage.getItem(RH_KEY_STORE); } catch(err){}
+  const el = document.getElementById('rhKeyState');
+  if(el) el.textContent = has ? '● key stored' : '○ no key stored';
+}
+
+function loadApiKeyUI(){
+  try {
+    const k = localStorage.getItem(RH_KEY_STORE);
+    if(k) document.getElementById('rhApiKey').value = k;
+    const e = localStorage.getItem(RH_EVENT_STORE);
+    if(e) document.getElementById('rhEventId').value = e;
+  } catch(err){}
+  reflectKeyState();
+}
+
+function saveApiKey(){
+  const k = document.getElementById('rhApiKey').value.trim();
+  try {
+    if(k) localStorage.setItem(RH_KEY_STORE, k);
+    else  localStorage.removeItem(RH_KEY_STORE);
+  } catch(err){
+    setRhStatus('Could not access localStorage (private mode?).', true); return;
+  }
+  setRhStatus(k ? 'Key saved to this browser.' : 'No key entered — nothing saved.');
+  reflectKeyState();
+}
+
+function clearApiKey(){
+  document.getElementById('rhApiKey').value = '';
+  try { localStorage.removeItem(RH_KEY_STORE); } catch(err){}
+  setRhStatus('Key cleared from this browser.');
+  reflectKeyState();
+}
+
+// Turn Raid-Helper signups into the internal roster shape used by the board.
+function mapRaidHelperSignups(signups){
+  const out = [];
+  const seen = new Set();
+  signups.forEach(s=>{
+    const name = String(s.name || '').replace(/[`:]/g,'').replace(/^\[|\]$/g,'').trim();
+    if(!name) return;
+
+    const classKey = String(s.className || '').toLowerCase().trim();
+    const spec = String(s.specName || '').toLowerCase().replace(/[^a-z]/g,'');
+
+    // status may live in className (Bench/Late/Tentative/Absence) or a status field
+    const status = RH_STATUS_MAP[classKey]
+                || RH_STATUS_MAP[String(s.status || '').toLowerCase()]
+                || 'active';
+    if(status === 'absence') return;           // absent raiders never reach the board
+
+    // resolve a real class: className if valid, else infer from spec
+    const cls  = CLASS_COLORS[classKey] ? classKey
+               : (CLASS_COLORS[SPEC_TO_CLASS[spec]] ? SPEC_TO_CLASS[spec] : '');
+    const role = cls || classKey || SPEC_TO_CLASS[spec] || '';
+
+    const key = name.toLowerCase();
+    if(seen.has(key)) return;                  // de-dupe by name, first signup wins
+    seen.add(key);
+
+    out.push({ id:'r'+(idCounter++), name, cls, role, spec, num:null, status });
+  });
+  return out;
+}
+
+async function fetchRaidHelper(){
+  const eventId = document.getElementById('rhEventId').value.trim();
+  if(!eventId){ setRhStatus('Enter a Raid-Helper event ID first.', true); return; }
+  try { localStorage.setItem(RH_EVENT_STORE, eventId); } catch(err){}
+
+  const key = document.getElementById('rhApiKey').value.trim();
+  setRhStatus('Fetching…');
+
+  let data;
+  try {
+    const res = await fetch(`https://raid-helper.dev/api/v2/events/${encodeURIComponent(eventId)}`, {
+      headers: key ? { 'Authorization': key } : {}
+    });
+    if(res.status === 401 || res.status === 403){
+      setRhStatus('Unauthorized — check your API key (required for private events).', true); return;
+    }
+    if(res.status === 404){ setRhStatus('Event not found — double-check the event ID.', true); return; }
+    if(!res.ok){ setRhStatus('Raid-Helper returned HTTP '+res.status+'.', true); return; }
+    data = await res.json();
+  } catch(err){
+    setRhStatus('Could not reach Raid-Helper (network or CORS). See the browser console.', true);
+    console.error('Raid-Helper fetch failed:', err);
+    return;
+  }
+
+  const signups = data.signUps || data.signups || [];
+  const members = mapRaidHelperSignups(signups);
+  if(!members.length){ setRhStatus('No usable signups found on that event.', true); return; }
+
+  roster = members;
+  roster.sort((a,b)=> (a.num ?? 999) - (b.num ?? 999));
+  autoFill();
+  setRhStatus(`Loaded ${members.length} signups from “${data.title || 'event ' + eventId}”.`);
+}
+
+loadApiKeyUI();
 renderAll();
 </script>
