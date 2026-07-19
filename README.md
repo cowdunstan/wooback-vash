@@ -9,7 +9,13 @@ tiers**: a **home** hub open to any member with the home role, and the Lady Vash
   menu (Home / Vash assignments) and app cards. Open to any signed-in tier.
 - **`board.html`** — the assignment board. Only reachable with a valid **officer**
   session; `app.js` + `styles.css` power it.
-- **`menu.js`** — shared session helpers + hamburger menu, used by both pages.
+- **`sheet.html`** — a read-only view of the guild's loot / BIS-priority sheet,
+  open to **any signed-in tier**; it embeds the sheet's `/preview` URL in an
+  `<iframe>` (see `SHEET_EMBED_URL` in the file), so Google's own formatting,
+  colors, merged banners, and tabs are preserved. It reads the live sheet via its
+  "anyone with the link" share setting, so the sign-in gate here is for the app's
+  flow, not a data barrier.
+- **`menu.js`** — shared session helpers + hamburger menu, used by every page.
 - **`raidhelper-proxy.worker.js`** — Cloudflare Worker doing two jobs:
   1. Discord OAuth (`/auth/login`, `/auth/callback`) — verifies the signed-in
      user's guild roles and issues a short-lived HMAC-signed session token whose
@@ -66,7 +72,19 @@ npx wrangler secret put SESSION_SECRET         # any long random string
 ```
 (Or Dashboard → the Worker → Settings → Variables and Secrets → Add → Secret.)
 
-### 4. Deploy
+### 4. Connect the loot sheet
+- No "Publish to web" needed. `SHEET_EMBED_URL` in `sheet.html` is just the
+  sheet's own link with `/edit?usp=sharing` replaced by `/preview`. To point it
+  at a different sheet, swap the id.
+- The sheet's **General access must be "Anyone with the link → Viewer"** so
+  members see it without a Google login. (If you set it to specific accounts
+  instead, the frame still works but each viewer must be signed into an
+  authorized Google account.)
+- Note: "anyone with the link" means the sheet's *contents* are reachable by
+  anyone who has that link. Fine for a BIS/loot guide, but don't put anything you
+  wouldn't want outside the guild on a tab of this sheet.
+
+### 5. Deploy
 ```
 npx wrangler deploy
 ```

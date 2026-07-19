@@ -1,0 +1,99 @@
+<meta charset="utf-8">
+<script>
+/* Access gate. Same as home.html: the loot sheet is open to any signed-in tier.
+   The embedded Google view is a "Publish to web" page (public URL), so this gate
+   only decides whether the app shows the page — it isn't a data barrier. */
+(function(){
+  var m = location.hash.match(/(?:^#|&)session=([^&]+)/);
+  if(m){
+    try{ localStorage.setItem('vashj_session', decodeURIComponent(m[1])); }catch(e){}
+    history.replaceState(null, '', location.pathname + location.search);
+  }
+  function valid(tok){
+    if(!tok) return false;
+    try{
+      var p = tok.split('.')[0].replace(/-/g,'+').replace(/_/g,'/');
+      while(p.length % 4) p += '=';
+      var payload = JSON.parse(atob(p));
+      return payload.exp && payload.exp > Math.floor(Date.now()/1000);
+    }catch(e){ return false; }
+  }
+  var tok = null;
+  try{ tok = localStorage.getItem('vashj_session'); }catch(e){}
+  if(!valid(tok)){
+    try{ localStorage.removeItem('vashj_session'); }catch(e){}
+    location.replace('index.html');
+  }
+})();
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+
+<div class="app">
+  <div class="wrap">
+    <div class="authbar">
+      <span class="authbar-left">
+        <div class="nav">
+          <button class="hamburger" id="navToggle" aria-label="Menu" aria-expanded="false" aria-controls="navDrawer">
+            <span></span><span></span><span></span>
+          </button>
+          <nav class="nav-drawer" id="navDrawer">
+            <a href="home.html">Home</a>
+            <a href="board.html" data-officer-only>Vash assignments</a>
+            <a href="sheet.html" class="active">Loot sheet</a>
+          </nav>
+        </div>
+        <span class="eyebrow">Guild Loot</span>
+      </span>
+      <span class="authbar-right">
+        <span id="authWho" class="auth-who"></span>
+        <button class="btn-ghost" onclick="logout()">Sign out</button>
+      </span>
+    </div>
+
+    <div class="sheet-head">
+      <div>
+        <h1>Loot Sheet</h1>
+        <p class="subtitle">Read-only BIS &amp; loot-priority guide — updates live from Google Sheets. Use the tabs at the bottom of the sheet.</p>
+      </div>
+      <a id="sheetOpen" class="btn-ghost" href="#" target="_blank" rel="noopener" style="display:none;">Open full view ↗</a>
+    </div>
+
+    <div id="sheetEmbed" class="sheet-embed"></div>
+
+    <footer>wooback guild tools — read-only. Edits happen in Google Sheets.</footer>
+  </div>
+</div>
+
+<script src="menu.js"></script>
+<script>
+/* The loot sheet's read-only embed. This is just the sheet's own share URL with
+   the trailing "/edit?usp=sharing" swapped for "/preview" — no "Publish to web"
+   step. It renders Google's live read-only view (colors, merged banners, tabs).
+   Requirement: the sheet's General access must stay "Anyone with the link →
+   Viewer" so members see it without a Google login; if you later restrict it to
+   specific accounts, this frame becomes Google-account gated instead. */
+const SHEET_EMBED_URL = 'https://docs.google.com/spreadsheets/d/18MHJQi6vz9Ax2yPwreGhnKc0SwvC_xIy2iCBGGgwbb4/preview';
+
+(function(){
+  const host = document.getElementById('sheetEmbed');
+  if(!SHEET_EMBED_URL || SHEET_EMBED_URL === 'PASTE_PUBLISHED_EMBED_URL_HERE'){
+    host.innerHTML =
+      '<div class="sheet-empty">The loot sheet isn’t connected yet.<br>' +
+      'Publish it to the web in Google Sheets and paste the embed URL into ' +
+      '<code>sheet.html</code> (<code>SHEET_EMBED_URL</code>).</div>';
+    return;
+  }
+  const frame = document.createElement('iframe');
+  frame.className = 'sheet-frame';
+  frame.src = SHEET_EMBED_URL;
+  frame.loading = 'lazy';
+  frame.title = 'Guild loot sheet';
+  host.appendChild(frame);
+
+  const open = document.getElementById('sheetOpen');
+  open.href = SHEET_EMBED_URL;
+  open.style.display = '';
+})();
+</script>
