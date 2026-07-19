@@ -248,6 +248,11 @@
           <button class="btn-ghost" onclick="saveApiKey()">Save key</button>
           <button class="btn-ghost" onclick="clearApiKey()">Clear key</button>
         </div>
+        <input type="text" id="rhProxy" autocomplete="off" placeholder="CORS proxy base URL — required when this page is hosted (e.g. https://rh-proxy.you.workers.dev)"
+               style="background:#0a1815;border:1px solid var(--panel-line);color:var(--text);border-radius:6px;padding:7px 10px;font-size:13px;font-family:'Inter';width:100%;margin-top:8px;">
+        <div style="font-size:10.5px;color:var(--text-dim);margin-top:5px;line-height:1.5;">
+          Raid-Helper blocks direct browser calls (CORS). Leave blank only on <code>localhost</code>; when hosted, point this at your own proxy — see <code>raidhelper-proxy.worker.js</code> in the repo.
+        </div>
         <div id="rhStatus" style="font-size:11.5px;color:var(--text-dim);margin-top:7px;min-height:15px;"></div>
         <div style="border-top:1px solid var(--panel-line);margin:14px 0 12px;"></div>
       </div>
@@ -875,6 +880,15 @@ function exportImage(){
    page with no backend — so treat it as a per-browser convenience, not a secret vault. */
 const RH_KEY_STORE   = 'wooback.raidhelper.apikey';
 const RH_EVENT_STORE = 'wooback.raidhelper.eventid';
+const RH_PROXY_STORE = 'wooback.raidhelper.proxy';
+
+// Base for API calls. Raid-Helper rejects cross-origin browser requests, so on a
+// hosted page you must route through your own CORS proxy (see raidhelper-proxy.worker.js).
+// The proxy forwards the path unchanged, so both branches use the same /vN/... suffix.
+function rhApiBase(){
+  const proxy = (document.getElementById('rhProxy').value || '').trim().replace(/\/+$/,'');
+  return proxy || 'https://raid-helper.dev/api';
+}
 
 // Raid-Helper signup buttons that represent a status rather than a class.
 const RH_STATUS_MAP = {
@@ -902,6 +916,8 @@ function loadApiKeyUI(){
     if(k) document.getElementById('rhApiKey').value = k;
     const e = localStorage.getItem(RH_EVENT_STORE);
     if(e) document.getElementById('rhEventId').value = e;
+    const p = localStorage.getItem(RH_PROXY_STORE);
+    if(p) document.getElementById('rhProxy').value = p;
   } catch(err){}
   reflectKeyState();
 }
@@ -959,14 +975,19 @@ function mapRaidHelperSignups(signups){
 async function fetchRaidHelper(){
   const eventId = document.getElementById('rhEventId').value.trim();
   if(!eventId){ setRhStatus('Enter a Raid-Helper event ID first.', true); return; }
-  try { localStorage.setItem(RH_EVENT_STORE, eventId); } catch(err){}
+  const proxy = document.getElementById('rhProxy').value.trim();
+  try {
+    localStorage.setItem(RH_EVENT_STORE, eventId);
+    if(proxy) localStorage.setItem(RH_PROXY_STORE, proxy);
+    else localStorage.removeItem(RH_PROXY_STORE);
+  } catch(err){}
 
   const key = document.getElementById('rhApiKey').value.trim();
   setRhStatus('Fetching…');
 
   let data;
   try {
-    const res = await fetch(`https://raid-helper.dev/api/v2/events/${encodeURIComponent(eventId)}`, {
+    const res = await fetch(`${rhApiBase()}/v2/events/${encodeURIComponent(eventId)}`, {
       headers: key ? { 'Authorization': key } : {}
     });
     if(res.status === 401 || res.status === 403){
@@ -976,7 +997,9 @@ async function fetchRaidHelper(){
     if(!res.ok){ setRhStatus('Raid-Helper returned HTTP '+res.status+'.', true); return; }
     data = await res.json();
   } catch(err){
-    setRhStatus('Could not reach Raid-Helper (network or CORS). See the browser console.', true);
+    const hint = proxy ? 'Proxy unreachable — check the proxy URL is deployed and allows this origin.'
+                       : 'Blocked by CORS — set a proxy URL above (see raidhelper-proxy.worker.js).';
+    setRhStatus(hint + ' See the browser console.', true);
     console.error('Raid-Helper fetch failed:', err);
     return;
   }
