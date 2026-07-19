@@ -4,9 +4,11 @@
  * Two jobs in one Worker:
  *
  *  1. Discord OAuth login (/auth/login, /auth/callback). A raider signs in with
- *     Discord; the Worker checks whether they hold one of the OFFICER_ROLE_IDS in
- *     the guild and, if so, mints a short-lived HMAC-signed session token which the
- *     board page stores. No bot is needed — the `guilds.members.read` scope lets us
+ *     Discord; the Worker reads their guild roles and grants access in two tiers:
+ *     anyone holding HOME_ROLE_ID reaches the home page, while OFFICER_ROLE_IDS
+ *     additionally unlock the Vash board + the Raid-Helper proxy. On success it
+ *     mints a short-lived HMAC-signed session token (with an `officer` flag) which
+ *     the pages store. No bot is needed — the `guilds.members.read` scope lets us
  *     read the signed-in user's own roles in the guild.
  *
  *  2. Raid-Helper CORS proxy (everything else). raid-helper.xyz blocks cross-origin
@@ -41,12 +43,16 @@ const ALLOWED_ORIGIN = 'https://cowdunstan.github.io';
 const DISCORD_API       = 'https://discord.com/api';
 const DISCORD_CLIENT_ID = '1528486803751829554';
 const GUILD_ID          = '1462481995119722649';
-// Any one of these Discord roles grants access.
+// Any one of these Discord roles grants officer access (the Vash board + the
+// Raid-Helper proxy).
 const OFFICER_ROLE_IDS  = [
   '1493701583668514836',
   '1470117612896649357',
   '1470862434720940304'
 ];
+// Broader access to the home page (any member with this role). Officers
+// implicitly have it too.
+const HOME_ROLE_ID       = '1474961634186236118';
 
 // This Worker's public URL. The OAuth redirect_uri is WORKER_BASE + '/auth/callback'
 // and must be registered verbatim in the Discord Developer Portal.
@@ -212,18 +218,21 @@ async function handleCallback(request, url, env) {
   }
 
   const roles = member.roles || [];
-  if (!roles.some(r => OFFICER_ROLE_IDS.includes(r))) {
-    return redirectToApp('/', 'denied', 'not_officer', CLEAR_STATE_COOKIE);
+  const isOfficer = roles.some(r => OFFICER_ROLE_IDS.includes(r));
+  const hasHome   = isOfficer || roles.includes(HOME_ROLE_ID);
+  if (!hasHome) {
+    return redirectToApp('/', 'denied', 'no_access', CLEAR_STATE_COOKIE);
   }
 
   const user = member.user || {};
   const session = await signSession({
     uid: user.id,
-    name: user.global_name || user.username || 'Officer',
+    name: user.global_name || user.username || 'Raider',
+    officer: isOfficer,
     exp: Math.floor(Date.now() / 1000) + SESSION_TTL
   }, env.SESSION_SECRET);
 
-  return redirectToApp('/board.html', 'session', session, CLEAR_STATE_COOKIE);
+  return redirectToApp('/home.html', 'session', session, CLEAR_STATE_COOKIE);
 }
 
 /* ─────────────────── Raid-Helper proxy (gated) ─────────────────── */
@@ -232,12 +241,16 @@ async function handleProxy(request, url, env) {
     return new Response('Method not allowed', { status: 405, headers: corsHeaders() });
   }
 
-  // Require a valid officer session before doing anything.
+  // Require a valid officer session before doing anything. A plain (home-tier)
+  // session is not enough — Raid-Helper stays officer-only.
   const auth = request.headers.get('Authorization') || '';
   const m = auth.match(/^Bearer\s+(.+)$/i);
   const session = m ? await verifySession(m[1], env.SESSION_SECRET) : null;
   if (!session) {
-    return jsonResponse(401, { error: 'unauthorized', detail: 'Officer sign-in required.' });
+    return jsonResponse(401, { error: 'unauthorized', detail: 'Sign-in required.' });
+  }
+  if (!session.officer) {
+    return jsonResponse(403, { error: 'forbidden', detail: 'Officer access required.' });
   }
 
   const target = RAID_HELPER + url.pathname + url.search;

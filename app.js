@@ -1,26 +1,11 @@
 /* ───────────────────────── Officer session ─────────────────────────
-   The board.html guard already redirected non-officers to the landing page.
-   Here we just read the stored session token to authorize Raid-Helper calls
-   (the Worker verifies its signature) and to show who's signed in. */
-function sessionToken(){
-  try{ return localStorage.getItem('vashj_session') || ''; }catch(e){ return ''; }
-}
+   The board.html guard already redirected non-officers away. The shared
+   session helpers (sessionToken/sessionName/logout/isOfficer) live in menu.js,
+   which is loaded before this file. Here we just wrap the token as a header to
+   authorize Raid-Helper calls (the Worker verifies its signature). */
 function rhHeaders(){
   const t = sessionToken();
   return t ? { 'Authorization': 'Bearer ' + t } : {};
-}
-function logout(){
-  try{ localStorage.removeItem('vashj_session'); }catch(e){}
-  location.replace('index.html');
-}
-function sessionName(){
-  const t = sessionToken();
-  if(!t) return '';
-  try{
-    let p = t.split('.')[0].replace(/-/g,'+').replace(/_/g,'/');
-    while(p.length % 4) p += '=';
-    return JSON.parse(atob(p)).name || '';
-  }catch(e){ return ''; }
 }
 
 const CLASS_COLORS = {
@@ -683,11 +668,5 @@ async function fetchEventById(eventId){
   setRhStatus(`Loaded ${members.length} signups from “${data.title || 'event ' + eventId}”.`);
 }
 
-(function showSignedIn(){
-  const el = document.getElementById('authWho');
-  if(!el) return;
-  const name = sessionName();
-  el.textContent = name ? 'Signed in as ' + name : '';
-})();
 
 renderAll();
