@@ -110,22 +110,55 @@ app.MapRaidLogEndpoints();
 
 app.Run();
 
-// Converts postgres://user:pass@host:port/db[?params] into an Npgsql keyword
-// connection string. SSL is required by most managed Postgres (Fly, Supabase).
+// Converts postgres://user:pass@host:port/db[?sslmode=...] into an Npgsql keyword
+// connection string. SSL handling: honor an explicit sslmode from the URL (Fly's
+// `postgres attach` sets sslmode=disable for the internal .flycast network, since
+// that traffic is already encrypted over WireGuard; external managed Postgres set
+// require). With no sslmode given, default internal hosts to Disable and everything
+// else to Require — matching how these providers actually expect to be reached.
+// Getting this wrong yields "unexpected EOF from the transport stream".
 static string ConnectionStringFromUrl(string url)
 {
     var uri = new Uri(url);
     var userInfo = uri.UserInfo.Split(':', 2);
+    var host = uri.Host;
+    var isInternal = host.EndsWith(".flycast", StringComparison.OrdinalIgnoreCase)
+                     || host.EndsWith(".internal", StringComparison.OrdinalIgnoreCase);
+
     var csb = new NpgsqlConnectionStringBuilder
     {
-        Host = uri.Host,
+        Host = host,
         Port = uri.IsDefaultPort ? 5432 : uri.Port,
         Username = Uri.UnescapeDataString(userInfo[0]),
         Password = userInfo.Length > 1 ? Uri.UnescapeDataString(userInfo[1]) : "",
-        Database = uri.AbsolutePath.TrimStart('/'),
-        SslMode = SslMode.Prefer
+        Database = uri.AbsolutePath.TrimStart('/')
+    };
+
+    var sslmode = QueryValue(uri.Query, "sslmode");
+    csb.SslMode = sslmode?.ToLowerInvariant() switch
+    {
+        "disable" => SslMode.Disable,
+        "allow" => SslMode.Allow,
+        "prefer" => SslMode.Prefer,
+        "require" => SslMode.Require,
+        "verify-ca" => SslMode.VerifyCA,
+        "verify-full" => SslMode.VerifyFull,
+        _ => isInternal ? SslMode.Disable : SslMode.Require
     };
     return csb.ConnectionString;
+}
+
+// First value for a key in a raw URL query string ("?a=1&b=2"), or null.
+static string? QueryValue(string query, string key)
+{
+    if (string.IsNullOrEmpty(query)) return null;
+    foreach (var part in query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries))
+    {
+        var kv = part.Split('=', 2);
+        if (Uri.UnescapeDataString(kv[0]).Equals(key, StringComparison.OrdinalIgnoreCase))
+            return kv.Length == 2 ? Uri.UnescapeDataString(kv[1]) : "";
+    }
+    return null;
 }
 
 // Exposed so integration tests / EF tooling can reference the entry assembly.
