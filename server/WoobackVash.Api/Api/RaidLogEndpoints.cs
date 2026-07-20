@@ -2,20 +2,22 @@ using Microsoft.EntityFrameworkCore;
 using WoobackVash.Api.Auth;
 using WoobackVash.Api.Data;
 using WoobackVash.Api.Models;
+using WoobackVash.Api.Services;
 
 namespace WoobackVash.Api.Api;
 
 /// <summary>
-/// Loot and attendance history (Phase 4), hung off a RaidEvent. Both are keyed by
-/// the same event key the board uses (a Raid-Helper event id, or "default"), and
-/// reference characters by name — resolved find-or-create — so records flow
-/// straight from the board roster without needing characters pre-linked. Officers
-/// can link those characters to members later via the identity endpoints.
+/// Loot and attendance history, hung off a RaidEvent. Loot is keyed by the board's
+/// event key (a Raid-Helper event id, or "default") and references characters by
+/// name — resolved find-or-create — so records flow straight from the board roster.
+/// Attendance is driven entirely by Warcraft Logs: officers import a report, whose
+/// guild-tagged players become present rows and, when new, unclaimed characters that
+/// officers can link to members via the identity endpoints (members.html).
 /// </summary>
 public static class RaidLogEndpoints
 {
     public record LootInput(string Event, string Character, string ItemName, long? ItemId, string? Note, string? Title);
-    public record AttendanceInput(string Event, string Character, string Status, string? Note, string? Title);
+    public record ImportInput(string Code);
 
     public static void MapRaidLogEndpoints(this IEndpointRouteBuilder app)
     {
@@ -80,6 +82,23 @@ public static class RaidLogEndpoints
 
         var attendance = app.MapGroup("/api/attendance");
 
+        // Raid nights with imported attendance, newest first — drives the picker.
+        attendance.MapGet("/events", async (HttpContext ctx, SessionTokenService tokens) =>
+        {
+            var (_, error) = ctx.RequireOfficer(tokens);
+            if (error is not null) return error;
+            var db = ctx.RequestServices.GetService<AppDbContext>();
+            if (db is null) return DbUnavailable();
+
+            var events = await db.RaidEvents.AsNoTracking()
+                .Where(e => e.WclReportCode != null)
+                .OrderByDescending(e => e.StartsAt)
+                .Select(e => new { code = e.WclReportCode, title = e.Title, startsAt = e.StartsAt, count = e.Attendance.Count })
+                .ToListAsync();
+            return Results.Json(events);
+        });
+
+        // Attendance rows for one imported report, each with its claim status.
         attendance.MapGet("", async (HttpContext ctx, SessionTokenService tokens) =>
         {
             var (_, error) = ctx.RequireOfficer(tokens);
@@ -87,45 +106,116 @@ public static class RaidLogEndpoints
             var db = ctx.RequestServices.GetService<AppDbContext>();
             if (db is null) return DbUnavailable();
 
-            var key = EventKey(ctx.Request.Query["event"]);
+            var code = ctx.Request.Query["code"].ToString().Trim();
+            if (string.IsNullOrEmpty(code)) return BadRequest("A report code is required.");
+
             var rows = await db.Attendance.AsNoTracking()
-                .Where(a => a.RaidEvent!.RhEventId == key)
+                .Where(a => a.RaidEvent!.WclReportCode == code)
                 .OrderBy(a => a.Character!.Name)
-                .Select(a => new { id = a.Id, character = a.Character!.Name, status = a.Status.ToString(), note = a.Note, recordedAt = a.RecordedAt })
+                .Select(a => new
+                {
+                    id = a.Id,
+                    character = a.Character!.Name,
+                    cls = a.Character!.Class,
+                    realm = a.Character!.Realm,
+                    status = a.Status.ToString(),
+                    memberId = a.Character!.MemberId,
+                    member = a.Character!.Member != null
+                        ? (a.Character.Member.DisplayName ?? a.Character.Member.DiscordUsername)
+                        : null
+                })
                 .ToListAsync();
             return Results.Json(rows);
         });
 
-        // Upsert one record per (event, character).
-        attendance.MapPost("", async (HttpContext ctx, SessionTokenService tokens, AttendanceInput input) =>
+        // Import a Warcraft Logs report: its guild-tagged players become present
+        // attendance rows; players we've never seen become unclaimed characters.
+        attendance.MapPost("/import", async (HttpContext ctx, SessionTokenService tokens, WarcraftLogsService wcl, ImportInput input) =>
         {
             var (_, error) = ctx.RequireOfficer(tokens);
             if (error is not null) return error;
             var db = ctx.RequestServices.GetService<AppDbContext>();
             if (db is null) return DbUnavailable();
-            if (string.IsNullOrWhiteSpace(input.Character))
-                return BadRequest("Character is required.");
-            if (!Enum.TryParse<AttendanceStatus>(input.Status, ignoreCase: true, out var status))
-                return BadRequest("Status must be one of: present, late, bench, absent.");
+            if (string.IsNullOrWhiteSpace(input.Code)) return BadRequest("A report code is required.");
 
-            var ev = await ResolveEvent(db, input.Event, input.Title);
-            var ch = await ResolveCharacter(db, input.Character);
-            // ev/ch may be unsaved (new) — save so their ids exist before we query.
-            await db.SaveChangesAsync();
+            var (status, result, wclError) = await wcl.GetReportPlayersAsync(input.Code.Trim());
+            if (result is null)
+                return Results.Json(new { error = "wcl", detail = wclError ?? "Warcraft Logs pull failed." }, statusCode: status);
 
-            var rec = await db.Attendance.FirstOrDefaultAsync(a => a.RaidEventId == ev.Id && a.CharacterId == ch.Id);
-            if (rec is null)
+            var ev = await ResolveWclEvent(db, result);
+
+            var newCharacters = 0;
+            var characters = new List<Character>(result.Players.Count);
+            foreach (var p in result.Players)
             {
-                rec = new AttendanceRecord { RaidEventId = ev.Id, CharacterId = ch.Id };
-                db.Attendance.Add(rec);
+                var (ch, wasNew) = await ResolveCharacterFromLog(db, p.Name, p.Realm, p.Cls);
+                if (wasNew) newCharacters++;
+                characters.Add(ch);
             }
-            rec.Status = status;
-            rec.Note = input.Note;
-            rec.RecordedAt = DateTimeOffset.UtcNow;
+            // Save so event + character ids exist before we upsert attendance.
             await db.SaveChangesAsync();
-            return Results.Json(new { id = rec.Id, status = rec.Status.ToString() });
+
+            var existing = await db.Attendance
+                .Where(a => a.RaidEventId == ev.Id)
+                .ToDictionaryAsync(a => a.CharacterId, a => a);
+            foreach (var ch in characters)
+            {
+                if (!existing.TryGetValue(ch.Id, out var rec))
+                {
+                    rec = new AttendanceRecord { RaidEventId = ev.Id, CharacterId = ch.Id };
+                    db.Attendance.Add(rec);
+                }
+                rec.Status = AttendanceStatus.Present;
+                rec.RecordedAt = DateTimeOffset.UtcNow;
+            }
+            await db.SaveChangesAsync();
+
+            return Results.Json(new
+            {
+                code = result.Code,
+                title = ev.Title,
+                imported = characters.Count,
+                newCharacters,
+                filteredOut = result.FilteredOut
+            });
         });
     }
+
+    // Find-or-create the RaidEvent for a WCL report, filling meta from the report.
+    private static async Task<RaidEvent> ResolveWclEvent(AppDbContext db, WarcraftLogsService.ReportPlayers r)
+    {
+        var ev = await db.RaidEvents.FirstOrDefaultAsync(e => e.WclReportCode == r.Code);
+        if (ev is null)
+        {
+            ev = new RaidEvent { WclReportCode = r.Code };
+            db.RaidEvents.Add(ev);
+        }
+        ev.Title ??= r.Title;
+        ev.Zone ??= r.Zone;
+        ev.StartsAt ??= r.StartTime > 0 ? DateTimeOffset.FromUnixTimeMilliseconds(r.StartTime) : null;
+        return ev;
+    }
+
+    // Like ResolveCharacter, but for log imports: seeds class/realm on creation and
+    // backfills them on an existing character when we have data and it doesn't.
+    private static async Task<(Character Character, bool WasNew)> ResolveCharacterFromLog(
+        AppDbContext db, string name, string? realm, string? cls)
+    {
+        var n = name.Trim();
+        var lower = n.ToLower();
+        var c = await db.Characters.FirstOrDefaultAsync(x => x.Name.ToLower() == lower);
+        if (c is null)
+        {
+            c = new Character { Name = n, Realm = NullIfBlank(realm), Class = NullIfBlank(cls) };
+            db.Characters.Add(c);
+            return (c, true);
+        }
+        c.Realm ??= NullIfBlank(realm);
+        c.Class ??= NullIfBlank(cls);
+        return (c, false);
+    }
+
+    private static string? NullIfBlank(string? s) => string.IsNullOrWhiteSpace(s) ? null : s;
 
     private static async Task<RaidEvent> ResolveEvent(AppDbContext db, string? key, string? title)
     {

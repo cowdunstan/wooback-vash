@@ -34,6 +34,7 @@ public class AppDbContext : DbContext
         {
             // Unique only when present; Postgres treats multiple NULLs as distinct.
             e.HasIndex(r => r.RhEventId).IsUnique();
+            e.HasIndex(r => r.WclReportCode).IsUnique();
         });
 
         b.Entity<BoardLayout>(e =>

@@ -1,0 +1,219 @@
+<meta charset="utf-8">
+<script>
+/* Officer gate — same as loot.html. Attendance is an officer tool; the .NET API
+   enforces it on every call, this just decides whether to show the page. */
+(function(){
+  var m = location.hash.match(/(?:^#|&)session=([^&]+)/);
+  if(m){
+    try{ localStorage.setItem('vashj_session', decodeURIComponent(m[1])); }catch(e){}
+    history.replaceState(null, '', location.pathname + location.search);
+  }
+  function payload(tok){
+    if(!tok) return null;
+    try{
+      var p = tok.split('.')[0].replace(/-/g,'+').replace(/_/g,'/');
+      while(p.length % 4) p += '=';
+      return JSON.parse(atob(p));
+    }catch(e){ return null; }
+  }
+  var tok = null;
+  try{ tok = localStorage.getItem('vashj_session'); }catch(e){}
+  var pl = payload(tok);
+  if(!pl || !pl.exp || pl.exp <= Math.floor(Date.now()/1000)){
+    try{ localStorage.removeItem('vashj_session'); }catch(e){}
+    location.replace('index.html');
+  } else if(!pl.officer){
+    location.replace('home.html');
+  }
+})();
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+<style>
+  .rl-toolbar{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;margin-bottom:8px}
+  .rl-card{background:var(--panel,#0d1a17);border:1px solid var(--panel-line,#1e332d);border-radius:10px;padding:16px;margin-top:14px}
+  .rl-card h2{font-family:'Cinzel',serif;font-size:16px;margin:0 0 4px}
+  .rl-card .card-sub{color:var(--text-dim,#7f9a92);font-size:12px;margin:0 0 12px}
+  .rl-form{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+  .rl-form select{background:#0a1815;border:1px solid var(--panel-line,#1e332d);color:var(--text,#dfeee9);border-radius:6px;padding:7px 9px;font-size:13px;font-family:'Inter';min-width:300px;max-width:100%}
+  table.rl{width:100%;border-collapse:collapse;font-size:13px}
+  table.rl th{text-align:left;color:var(--text-dim,#7f9a92);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.6px;padding:6px 10px;border-bottom:1px solid var(--panel-line,#1e332d)}
+  table.rl td{padding:8px 10px;border-bottom:1px solid rgba(30,51,45,.5)}
+  table.rl tr:last-child td{border-bottom:none}
+  table.rl .muted{color:var(--text-dim,#7f9a92)}
+  .cls{color:var(--text-dim,#7f9a92)}
+  .rl-empty{color:var(--text-dim,#7f9a92);padding:12px;font-size:13px}
+  .pill{display:inline-block;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600}
+  .pill-main{background:rgba(46,230,171,.16);color:#2ee6ab}
+  .pill-unclaimed{background:rgba(224,165,61,.18);color:#e0a53d}
+  .banner{margin-top:14px;padding:11px 14px;border-radius:8px;font-size:13px;background:rgba(224,165,61,.12);border:1px solid rgba(224,165,61,.35);color:var(--text,#dfeee9);display:none}
+  .banner a{color:var(--amber,#e0a53d);font-weight:600}
+</style>
+
+<div class="app">
+  <div class="wrap">
+    <div class="authbar">
+      <span class="authbar-left">
+        <div class="nav">
+          <button class="hamburger" id="navToggle" aria-label="Menu" aria-expanded="false" aria-controls="navDrawer">
+            <span></span><span></span><span></span>
+          </button>
+          <nav class="nav-drawer" id="navDrawer">
+            <a href="home.html">Home</a>
+            <a href="logs.html">Warcraft Logs</a>
+            <a href="board.html" data-officer-only>Vash assignments</a>
+            <a href="attendance.html" class="active" data-officer-only>Attendance</a>
+            <a href="loot.html" data-officer-only>Loot log</a>
+            <a href="members.html" data-officer-only>Roster &amp; alts</a>
+            <a href="sheet.html">Loot sheet</a>
+          </nav>
+        </div>
+        <span class="eyebrow">Raid record</span>
+      </span>
+      <span class="authbar-right">
+        <span id="authWho" class="auth-who"></span>
+        <button class="btn-ghost" onclick="logout()">Sign out</button>
+      </span>
+    </div>
+
+    <h1>Attendance</h1>
+    <p class="subtitle">Attendance is pulled from Warcraft Logs. Pick one of the guild's logs and import it — everyone the log shows as a wooback member is marked present. New characters are recorded unclaimed for you to link in <a href="members.html">Roster &amp; alts</a>.</p>
+
+    <div class="rl-card">
+      <h2>Pull from Warcraft Logs</h2>
+      <p class="card-sub">Choose a raid log and import its roster. Re-importing a log refreshes it.</p>
+      <div class="rl-form">
+        <select id="reportPick"><option value="">Loading logs…</option></select>
+        <button class="btn-primary" id="pullBtn" onclick="pull()" disabled>Pull attendance</button>
+        <span id="pullStatus" style="font-size:11.5px;color:var(--text-dim);min-height:15px;"></span>
+      </div>
+      <div class="banner" id="newBanner"></div>
+    </div>
+
+    <div class="rl-card">
+      <h2>Attendance by raid</h2>
+      <p class="card-sub">Imported raids, newest first. Pick one to see who was present.</p>
+      <div class="rl-form" style="margin-bottom:12px">
+        <select id="eventPick" onchange="loadAttendance()"><option value="">No imported raids yet.</option></select>
+        <span id="viewStatus" style="font-size:11.5px;color:var(--text-dim);min-height:15px;"></span>
+      </div>
+      <table class="rl"><thead><tr><th>Character</th><th>Class</th><th>Realm</th><th>Claimed by</th></tr></thead>
+        <tbody id="attBody"><tr><td colspan="4" class="rl-empty">Nothing loaded.</td></tr></tbody>
+      </table>
+    </div>
+
+    <footer>wooback guild tools — attendance is pulled from Warcraft Logs into the guild database.</footer>
+  </div>
+</div>
+
+<script src="menu.js"></script>
+<script>
+// The .NET backend: proxies Warcraft Logs and stores attendance (same host as loot).
+const API_BASE = 'https://wooback-vash-api.fly.dev';
+function authHeaders(extra){ return Object.assign({ 'Authorization': 'Bearer ' + sessionToken() }, extra || {}); }
+function esc(s){ return String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+// A fetch wrapper that maps the shared auth failures to friendly UX.
+async function api(path, opts){
+  const res = await fetch(API_BASE + path, Object.assign({ headers: authHeaders(opts && opts.body ? {'Content-Type':'application/json'} : null) }, opts));
+  if(res.status === 401){ setPull('Session expired — signing out…', true); setTimeout(logout, 1200); throw new Error('401'); }
+  if(res.status === 403){ setPull('Officer access required.', true); throw new Error('403'); }
+  return res;
+}
+
+function setPull(msg, isErr){ const el = document.getElementById('pullStatus'); el.textContent = msg || ''; el.style.color = isErr ? 'var(--amber)' : 'var(--text-dim)'; }
+function setView(msg, isErr){ const el = document.getElementById('viewStatus'); el.textContent = msg || ''; el.style.color = isErr ? 'var(--amber)' : 'var(--text-dim)'; }
+function fmtDate(ms){ if(!ms) return ''; try{ return new Date(ms).toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric'}); }catch(e){ return ''; } }
+function fmtIso(iso){ try{ const d = new Date(iso); return isNaN(d) ? '' : d.toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric',year:'numeric'}); }catch(e){ return ''; } }
+
+// Populate the report dropdown from the guild's Warcraft Logs (same feed as logs.html).
+async function loadReports(){
+  try{
+    const res = await fetch(API_BASE + '/wcl/reports', { headers: authHeaders() });
+    let data = {}; try{ data = await res.json(); }catch(e){}
+    const sel = document.getElementById('reportPick');
+    if(!res.ok){ sel.innerHTML = '<option value="">' + esc((data && data.detail) || 'Could not load logs.') + '</option>'; return; }
+    const reports = data.reports || [];
+    if(!reports.length){ sel.innerHTML = '<option value="">No logs found for this guild.</option>'; return; }
+    sel.innerHTML = '<option value="">— pick a log —</option>' + reports.map(r=>{
+      const label = (fmtDate(r.startTime) ? fmtDate(r.startTime) + ' · ' : '') + (r.title || r.zone || r.code);
+      return '<option value="' + esc(r.code) + '">' + esc(label) + '</option>';
+    }).join('');
+    document.getElementById('pullBtn').disabled = false;
+  }catch(e){
+    document.getElementById('reportPick').innerHTML = '<option value="">Could not reach the log service.</option>';
+  }
+}
+
+async function pull(){
+  const code = document.getElementById('reportPick').value;
+  if(!code){ setPull('Pick a log first.', true); return; }
+  const btn = document.getElementById('pullBtn');
+  btn.disabled = true;
+  setPull('Pulling from Warcraft Logs…');
+  document.getElementById('newBanner').style.display = 'none';
+  try{
+    const res = await api('/api/attendance/import', { method:'POST', body: JSON.stringify({ code }) });
+    let data = {}; try{ data = await res.json(); }catch(e){}
+    if(!res.ok){ setPull((data && data.detail) || ('Import failed (HTTP ' + res.status + ').'), true); return; }
+    const filtered = data.filteredOut ? ' · ' + data.filteredOut + ' non-guild filtered out' : '';
+    setPull('Imported ' + data.imported + ' present' + filtered + '.');
+    if(data.newCharacters){
+      const b = document.getElementById('newBanner');
+      b.innerHTML = data.newCharacters + ' new character' + (data.newCharacters === 1 ? '' : 's') +
+        ' discovered and left unclaimed. <a href="members.html">Claim them in Roster &amp; alts →</a>';
+      b.style.display = '';
+    }
+    await loadEvents(code);
+    await loadAttendance();
+  }catch(err){ if(!['401','403'].includes(err.message)) setPull('Could not reach the guild database.', true); }
+  finally{ btn.disabled = false; }
+}
+
+// Load the imported-raid picker; optionally preselect a code.
+async function loadEvents(selectCode){
+  try{
+    const res = await api('/api/attendance/events');
+    if(!res.ok) return;
+    const events = await res.json();
+    const sel = document.getElementById('eventPick');
+    if(!events.length){ sel.innerHTML = '<option value="">No imported raids yet.</option>'; return; }
+    sel.innerHTML = events.map(e=>{
+      const label = (e.startsAt ? fmtIso(e.startsAt) + ' · ' : '') + (e.title || e.code) + ' (' + e.count + ')';
+      return '<option value="' + esc(e.code) + '">' + esc(label) + '</option>';
+    }).join('');
+    if(selectCode) sel.value = selectCode;
+  }catch(e){ /* non-fatal */ }
+}
+
+function renderAttendance(rows){
+  const b = document.getElementById('attBody');
+  if(!rows.length){ b.innerHTML = '<tr><td colspan="4" class="rl-empty">No attendance for this raid.</td></tr>'; return; }
+  b.innerHTML = rows.map(r=>{
+    const claim = r.member
+      ? '<span class="pill pill-main">' + esc(r.member) + '</span>'
+      : '<span class="pill pill-unclaimed">Unclaimed</span>';
+    return '<tr><td><strong>' + esc(r.character) + '</strong></td>' +
+      '<td>' + (r.cls ? '<span class="cls">' + esc(r.cls) + '</span>' : '<span class="muted">—</span>') + '</td>' +
+      '<td class="muted">' + (r.realm ? esc(r.realm) : '—') + '</td>' +
+      '<td>' + claim + '</td></tr>';
+  }).join('');
+}
+
+async function loadAttendance(){
+  const code = document.getElementById('eventPick').value;
+  if(!code){ renderAttendance([]); return; }
+  setView('Loading…');
+  try{
+    const res = await api('/api/attendance?code=' + encodeURIComponent(code));
+    if(!res.ok){ setView('Could not load attendance (HTTP ' + res.status + ').', true); return; }
+    const rows = await res.json();
+    renderAttendance(rows);
+    setView(rows.length + ' present.');
+  }catch(err){ if(!['401','403'].includes(err.message)) setView('Could not reach the guild database.', true); }
+}
+
+loadReports();
+loadEvents().then(loadAttendance);
+</script>
