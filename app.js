@@ -583,14 +583,14 @@ const RH_SERVER_ID = '1462481995119722649';
 const RH_WINDOW_DAYS = 7;
 
 // Raid-Helper rejects cross-origin browser requests, so every call routes through
-// our own CORS proxy Worker (see raidhelper-proxy.worker.js), which forwards the
-// path unchanged to https://raid-helper.xyz/api, adds the token, and returns the
-// CORS header the browser needs.
-const RH_PROXY = 'https://wooback-vash.cowdunstan.workers.dev';
+// our own CORS proxy (the .NET backend, server/WoobackVash.Api), which forwards
+// the path unchanged to https://raid-helper.xyz/api, adds the token, and returns
+// the CORS header the browser needs.
+const RH_PROXY = 'https://wooback-vash-api.fly.dev';
 function rhApiBase(){ return RH_PROXY; }
 
-// The .NET persistence API (board save/load). Same host that will serve the
-// proxy + OAuth after cutover; for now the board talks to it directly.
+// The .NET backend also serves board save/load + loot/attendance. Same host as
+// the proxy + OAuth now that the cutover is done.
 const API_BASE = 'https://wooback-vash-api.fly.dev';
 // The storage key for the current board: a Raid-Helper event id once one is
 // loaded, otherwise "default" for a manually built board.
@@ -643,7 +643,7 @@ function mapRaidHelperSignups(signups){
 // Friendly hint for a failed fetch — the usual culprit is the proxy Worker being
 // down or not allowing this origin (ALLOWED_ORIGIN in raidhelper-proxy.worker.js).
 function rhNetworkHint(){
-  return 'Could not reach the proxy — is the Worker deployed and is this origin allowed?';
+  return 'Could not reach the proxy — is the backend up and is this origin allowed?';
 }
 
 // Human-readable date for an event, for the picker labels.
@@ -668,7 +668,7 @@ async function loadServerEvents(){
   try {
     const res = await fetch(`${rhApiBase()}/v4/servers/${encodeURIComponent(RH_SERVER_ID)}/events`, { headers: rhHeaders() });
     if(res.status === 401){ setRhStatus('Session expired — signing you out…', true); setTimeout(logout, 1200); return; }
-    if(res.status === 403){ setRhStatus('Unauthorized — set the RH_TOKEN secret on the proxy Worker.', true); return; }
+    if(res.status === 403){ setRhStatus('Unauthorized — the Raid-Helper token isn’t set on the backend.', true); return; }
     if(res.status === 404){ setRhStatus('Server not found — check RH_SERVER_ID.', true); return; }
     if(!res.ok){ setRhStatus('Raid-Helper returned HTTP ' + res.status + '.', true); return; }
     data = await res.json();
@@ -731,7 +731,7 @@ async function fetchEventById(eventId){
   try {
     const res = await fetch(`${rhApiBase()}/v4/events/${encodeURIComponent(eventId)}`, { headers: rhHeaders() });
     if(res.status === 401){ setRhStatus('Session expired — signing you out…', true); setTimeout(logout, 1200); return; }
-    if(res.status === 403){ setRhStatus('Unauthorized — set the RH_TOKEN secret on the proxy Worker.', true); return; }
+    if(res.status === 403){ setRhStatus('Unauthorized — the Raid-Helper token isn’t set on the backend.', true); return; }
     if(res.status === 404){ setRhStatus('Event not found (it may have been deleted).', true); return; }
     if(!res.ok){ setRhStatus('Raid-Helper returned HTTP ' + res.status + '.', true); return; }
     data = await res.json();

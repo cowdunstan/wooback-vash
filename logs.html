@@ -73,8 +73,8 @@
 
 <script src="menu.js"></script>
 <script>
-  // The auth Worker that proxies the Warcraft Logs API (see raidhelper-proxy.worker.js).
-  const WCL_BASE = 'https://wooback-vash.cowdunstan.workers.dev';
+  // The .NET backend that proxies the Warcraft Logs API (server/WoobackVash.Api).
+  const WCL_BASE = 'https://wooback-vash-api.fly.dev';
 
   function setStatus(msg, isErr){
     const el = document.getElementById('logStatus');

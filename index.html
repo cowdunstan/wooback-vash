@@ -22,8 +22,8 @@
 </div>
 
 <script>
-  // The auth Worker that handles Discord OAuth (see raidhelper-proxy.worker.js).
-  const AUTH_BASE = 'https://wooback-vash.cowdunstan.workers.dev';
+  // The .NET backend that handles Discord OAuth (server/WoobackVash.Api).
+  const AUTH_BASE = 'https://wooback-vash-api.fly.dev';
 
   document.getElementById('signin').addEventListener('click', function(){
     location.href = AUTH_BASE + '/auth/login';
