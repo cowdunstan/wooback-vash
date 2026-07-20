@@ -42,7 +42,8 @@
   table.rl td{padding:8px 10px;border-bottom:1px solid rgba(30,51,45,.5)}
   table.rl tr:last-child td{border-bottom:none}
   table.rl .muted{color:var(--text-dim,#7f9a92)}
-  .cls{color:var(--text-dim,#7f9a92)}
+  table.rl td strong{font-weight:600}
+  .cls{color:#aecabf}
   .rl-empty{color:var(--text-dim,#7f9a92);padding:12px;font-size:13px}
   .pill{display:inline-block;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600}
   .pill-main{background:rgba(46,230,171,.16);color:#2ee6ab}
@@ -113,6 +114,24 @@
 const API_BASE = 'https://wooback-vash-api.fly.dev';
 function authHeaders(extra){ return Object.assign({ 'Authorization': 'Bearer ' + sessionToken() }, extra || {}); }
 function esc(s){ return String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+// WoW class colours (Blizzard palette, a couple brightened for contrast on the
+// dark panel). WCL reports the class as its subType, e.g. "Warrior"/"DeathKnight".
+const CLASS_COLORS = {
+  warrior:'#c79c6e', paladin:'#f58cba', hunter:'#abd473', rogue:'#fff569',
+  priest:'#ffffff', deathknight:'#e0475f', shaman:'#3b8de0', mage:'#69ccf0',
+  warlock:'#a99ce0', monk:'#00ff96', druid:'#ff7d0a', demonhunter:'#a330c9',
+  evoker:'#33937f'
+};
+function classColor(cls){
+  if(!cls) return null;
+  return CLASS_COLORS[String(cls).toLowerCase().replace(/[^a-z]/g,'')] || null;
+}
+// A character name, coloured by class so it's legible and identifiable at a glance.
+function charName(name, cls){
+  const c = classColor(cls);
+  return '<strong' + (c ? ' style="color:' + c + '"' : '') + '>' + esc(name) + '</strong>';
+}
 
 // A fetch wrapper that maps the shared auth failures to friendly UX.
 async function api(path, opts){
@@ -194,7 +213,7 @@ function renderAttendance(rows){
     const claim = r.member
       ? '<span class="pill pill-main">' + esc(r.member) + '</span>'
       : '<span class="pill pill-unclaimed">Unclaimed</span>';
-    return '<tr><td><strong>' + esc(r.character) + '</strong></td>' +
+    return '<tr><td>' + charName(r.character, r.cls) + '</td>' +
       '<td>' + (r.cls ? '<span class="cls">' + esc(r.cls) + '</span>' : '<span class="muted">—</span>') + '</td>' +
       '<td class="muted">' + (r.realm ? esc(r.realm) : '—') + '</td>' +
       '<td>' + claim + '</td></tr>';
