@@ -2,8 +2,8 @@
 
 Guild tools for the wooback Discord server, gated behind Discord access in **two
 tiers**: a **home** hub open to any member with the home role, and the officer
-tools (the Lady Vashj assignment **board** and the **loot & attendance** log)
-reserved for **officers**.
+tools (the Lady Vashj assignment **board**, the **attendance** and **loot** logs,
+and the **roster**) reserved for **officers**.
 
 The site is a static frontend on **GitHub Pages** (`wooback.info`) talking to a
 **.NET 8 backend** (`server/`) hosted on **Fly.io** with **Postgres**. The backend
@@ -23,8 +23,14 @@ board, identity links, loot, and attendance.
 - **`board.html`** — the Lady Vashj assignment board (**officers only**); `app.js`
   + `styles.css` power it. Imports rosters from Raid-Helper, and **saves/loads**
   the whole board (roster + slot counts + assignments) to the backend per raid.
-- **`loot.html`** — **loot & attendance** log (**officers only**): per-raid loot
-  awards and attendance, saved to the guild database.
+- **`attendance.html`** — **attendance** app (**officers only**): imports a
+  Warcraft Logs report and marks its guild-tagged players present. Characters not
+  yet linked to a member are created **unclaimed** for the roster to adopt.
+- **`loot.html`** — **loot** log (**officers only**): per-raid loot awards, saved
+  to the guild database.
+- **`members.html`** — **roster & alts** (**officers only**): the Discord↔main↔alts
+  identity links; set mains, add/reassign characters, and **claim** the unclaimed
+  characters that attendance & loot create.
 - **`sheet.html`** — a read-only `<iframe>` of the guild's loot / BIS sheet
   (`SHEET_EMBED_URL`), open to any signed-in tier. Reads the live sheet via its
   "anyone with the link" share setting, so the sign-in gate here is for the app's
@@ -33,7 +39,8 @@ board, identity links, loot, and attendance.
 
 Each page points at the backend through a single constant: `AUTH_BASE`
 (`index.html`), `RH_PROXY` + `API_BASE` (`app.js`), `WCL_BASE` (`logs.html`),
-`API_BASE` (`loot.html`) — all `https://wooback-vash-api.fly.dev`.
+`API_BASE` (`loot.html`, `attendance.html`, `members.html`) — all
+`https://wooback-vash-api.fly.dev`.
 
 ## Backend (`server/WoobackVash.Api`)
 
@@ -49,8 +56,11 @@ A .NET 8 Minimal-API app (EF Core + Npgsql). Routes:
   public). Server-side v2 API credentials, a cached report list (officers can
   force a refresh), and an officer-only `/wcl/ratelimit` budget check.
 - **Persistence** (officer-gated) — `/api/board` (save/load the board snapshot as
-  jsonb), `/api/members` + `/api/characters` (Discord↔main↔alts identity links),
-  `/api/loot` and `/api/attendance` (per-raid history).
+  jsonb), `/api/members` + `/api/characters` (Discord↔main↔alts identity links,
+  incl. `?linked=false` for unclaimed characters), `/api/loot` (per-raid awards),
+  and `/api/attendance` — `POST /import` pulls a WCL report's guild-tagged roster
+  into present rows (creating unclaimed characters), with `GET /events` and
+  `GET ?code=` to browse it.
 - **Health** — `/healthz` (liveness), `/readyz` (DB reachability + error detail).
 
 Non-secret config (Discord client id, guild id, role ids, WCL guild identity)

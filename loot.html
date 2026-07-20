@@ -1,6 +1,6 @@
 <meta charset="utf-8">
 <script>
-/* Officer gate — same as board.html. Loot & attendance are officer tools; the
+/* Officer gate — same as board.html. The loot log is an officer tool; the
    .NET API enforces it on every call, this just decides whether to show the page. */
 (function(){
   var m = location.hash.match(/(?:^#|&)session=([^&]+)/);
@@ -32,9 +32,7 @@
 <link rel="stylesheet" href="styles.css">
 <style>
   .rl-toolbar{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;margin-bottom:8px}
-  .rl-grid{display:grid;grid-template-columns:1fr 1fr;gap:22px;margin-top:14px}
-  @media (max-width:820px){ .rl-grid{grid-template-columns:1fr} }
-  .rl-card{background:var(--panel,#0d1a17);border:1px solid var(--panel-line,#1e332d);border-radius:10px;padding:16px}
+  .rl-card{background:var(--panel,#0d1a17);border:1px solid var(--panel-line,#1e332d);border-radius:10px;padding:16px;margin-top:14px}
   .rl-card h2{font-family:'Cinzel',serif;font-size:16px;margin:0 0 12px}
   .rl-form{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px}
   .rl-form input,.rl-form select{background:#0a1815;border:1px solid var(--panel-line,#1e332d);color:var(--text,#dfeee9);border-radius:6px;padding:7px 9px;font-size:13px;font-family:'Inter'}
@@ -45,9 +43,6 @@
   table.rl .muted{color:var(--text-dim,#7f9a92)}
   .rl-empty{color:var(--text-dim,#7f9a92);padding:10px 8px;font-size:13px}
   .rl-del{background:none;border:none;color:var(--amber,#e0a53d);cursor:pointer;font-size:13px;padding:2px 6px}
-  .status-pill{display:inline-block;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600}
-  .st-present{background:rgba(46,230,171,.16);color:#2ee6ab}.st-late{background:rgba(224,165,61,.18);color:#e0a53d}
-  .st-bench{background:rgba(127,176,242,.16);color:#7fb0f2}.st-absent{background:rgba(230,90,90,.16);color:#e65a5a}
 </style>
 
 <div class="app">
@@ -62,7 +57,8 @@
             <a href="home.html">Home</a>
             <a href="logs.html">Warcraft Logs</a>
             <a href="board.html" data-officer-only>Vash assignments</a>
-            <a href="loot.html" class="active" data-officer-only>Loot &amp; attendance</a>
+            <a href="attendance.html" data-officer-only>Attendance</a>
+            <a href="loot.html" class="active" data-officer-only>Loot log</a>
             <a href="members.html" data-officer-only>Roster &amp; alts</a>
             <a href="sheet.html">Loot sheet</a>
           </nav>
@@ -75,8 +71,8 @@
       </span>
     </div>
 
-    <h1>Loot &amp; Attendance</h1>
-    <p class="subtitle">Per-raid loot log and attendance. Pick a raid (a Raid-Helper event id, or the default board), then record awards and who showed.</p>
+    <h1>Loot log</h1>
+    <p class="subtitle">Per-raid loot awards. Pick a raid (a Raid-Helper event id, or the default board), then record who won what. Attendance now lives in its own <a href="attendance.html">Attendance</a> app.</p>
 
     <div class="rl-toolbar">
       <div class="field">
@@ -88,40 +84,20 @@
       <span id="rlStatus" style="font-size:11.5px;color:var(--text-dim);min-height:15px;"></span>
     </div>
 
-    <div class="rl-grid">
-      <div class="rl-card">
-        <h2>Attendance</h2>
-        <div class="rl-form">
-          <input class="name" id="attName" placeholder="Character">
-          <select id="attStatus">
-            <option value="present">Present</option>
-            <option value="late">Late</option>
-            <option value="bench">Bench</option>
-            <option value="absent">Absent</option>
-          </select>
-          <input class="note" id="attNote" placeholder="Note (optional)">
-          <button class="btn-ghost" onclick="addAttendance()">Mark</button>
-        </div>
-        <table class="rl"><thead><tr><th>Character</th><th>Status</th><th>Note</th></tr></thead>
-          <tbody id="attBody"><tr><td colspan="3" class="rl-empty">Nothing loaded.</td></tr></tbody>
-        </table>
+    <div class="rl-card">
+      <h2>Loot awards</h2>
+      <div class="rl-form">
+        <input class="name" id="lootName" placeholder="Character">
+        <input class="item" id="lootItem" placeholder="Item">
+        <input class="note" id="lootNote" placeholder="Note (optional)">
+        <button class="btn-ghost" onclick="addLoot()">Add</button>
       </div>
-
-      <div class="rl-card">
-        <h2>Loot log</h2>
-        <div class="rl-form">
-          <input class="name" id="lootName" placeholder="Character">
-          <input class="item" id="lootItem" placeholder="Item">
-          <input class="note" id="lootNote" placeholder="Note (optional)">
-          <button class="btn-ghost" onclick="addLoot()">Add</button>
-        </div>
-        <table class="rl"><thead><tr><th>Item</th><th>Character</th><th>When</th><th></th></tr></thead>
-          <tbody id="lootBody"><tr><td colspan="4" class="rl-empty">Nothing loaded.</td></tr></tbody>
-        </table>
-      </div>
+      <table class="rl"><thead><tr><th>Item</th><th>Character</th><th>When</th><th></th></tr></thead>
+        <tbody id="lootBody"><tr><td colspan="4" class="rl-empty">Nothing loaded.</td></tr></tbody>
+      </table>
     </div>
 
-    <footer>wooback guild tools — loot &amp; attendance are saved to the guild database.</footer>
+    <footer>wooback guild tools — loot awards are saved to the guild database.</footer>
   </div>
 </div>
 
@@ -144,16 +120,6 @@ async function api(path, opts){
 
 function fmtWhen(iso){ try{ const d = new Date(iso); return isNaN(d) ? '' : d.toLocaleDateString(undefined,{month:'short',day:'numeric'}) + ' ' + d.toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'}); }catch(e){ return ''; } }
 
-function renderAttendance(rows){
-  const b = document.getElementById('attBody');
-  if(!rows.length){ b.innerHTML = '<tr><td colspan="3" class="rl-empty">No attendance recorded yet.</td></tr>'; return; }
-  b.innerHTML = rows.map(r=>{
-    const s = String(r.status||'').toLowerCase();
-    return '<tr><td>'+esc(r.character)+'</td>'+
-      '<td><span class="status-pill st-'+esc(s)+'">'+esc(r.status)+'</span></td>'+
-      '<td class="muted">'+esc(r.note)+'</td></tr>';
-  }).join('');
-}
 function renderLoot(rows){
   const b = document.getElementById('lootBody');
   if(!rows.length){ b.innerHTML = '<tr><td colspan="4" class="rl-empty">No loot recorded yet.</td></tr>'; return; }
@@ -168,25 +134,9 @@ function renderLoot(rows){
 async function loadAll(){
   setStatus('Loading…');
   try{
-    const [aRes, lRes] = await Promise.all([
-      api('/api/attendance?event=' + encodeURIComponent(evKey())),
-      api('/api/loot?event=' + encodeURIComponent(evKey()))
-    ]);
-    renderAttendance(await aRes.json());
+    const lRes = await api('/api/loot?event=' + encodeURIComponent(evKey()));
     renderLoot(await lRes.json());
     setStatus('Loaded ' + evKey() + '.');
-  }catch(err){ if(!['401','403'].includes(err.message)) setStatus('Could not reach the guild database.', true); }
-}
-
-async function addAttendance(){
-  const character = document.getElementById('attName').value.trim();
-  if(!character){ setStatus('Enter a character name.', true); return; }
-  const body = { event: evKey(), character, status: document.getElementById('attStatus').value, note: document.getElementById('attNote').value.trim() || null };
-  try{
-    const res = await api('/api/attendance', { method:'POST', body: JSON.stringify(body) });
-    if(!res.ok){ setStatus('Save failed (HTTP ' + res.status + ').', true); return; }
-    document.getElementById('attName').value = ''; document.getElementById('attNote').value = '';
-    loadAll();
   }catch(err){ if(!['401','403'].includes(err.message)) setStatus('Could not reach the guild database.', true); }
 }
 

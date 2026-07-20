@@ -11,6 +11,10 @@ public class RaidEvent
     /// <summary>Raid-Helper event id, when this event came from Raid-Helper. Unique.</summary>
     public string? RhEventId { get; set; }
 
+    /// <summary>Warcraft Logs report code, when this event was imported from a WCL
+    /// log (the attendance app keys on this). Unique when present.</summary>
+    public string? WclReportCode { get; set; }
+
     public string? Title { get; set; }
     public DateTimeOffset? StartsAt { get; set; }
     public string? Zone { get; set; }

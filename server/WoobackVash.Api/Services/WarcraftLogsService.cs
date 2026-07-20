@@ -153,6 +153,153 @@ public class WarcraftLogsService
         }
     }
 
+    /// <summary>A guild-tagged player found in a Warcraft Logs report.</summary>
+    public record ReportPlayer(string Name, string Realm, string? Cls);
+
+    /// <summary>The roster pulled from one report, filtered to wooback members.</summary>
+    public record ReportPlayers(string Code, string? Title, long StartTime, string? Zone,
+        List<ReportPlayer> Players, int FilteredOut);
+
+    /// <summary>Pulls the participant roster from a single Warcraft Logs report and
+    /// keeps only the characters WCL lists as members of our guild (per-character
+    /// <c>guilds</c> lookup). Feeds the attendance import: present players become
+    /// attendance rows, unknown ones become unclaimed characters. Two upstream calls
+    /// — the report's actors, then one batched character-guild query — so it is
+    /// officer-gated at the endpoint. Returns (status, result, error): on success
+    /// <paramref name="error"/> is null; on failure result is null.</summary>
+    public async Task<(int Status, ReportPlayers? Result, string? Error)> GetReportPlayersAsync(string code)
+    {
+        if (string.IsNullOrWhiteSpace(code))
+            return (400, null, "A report code is required.");
+
+        var token = await GetTokenAsync();
+        if (token is null)
+            return (501, null, "Warcraft Logs API credentials are not set on the server yet.");
+
+        // ── Query A: the report's player roster ──────────────────────────────
+        const string reportQuery =
+            "query($code:String!){reportData{report(code:$code){" +
+            "title startTime endTime zone{name} " +
+            "masterData{actors(type:\"Player\"){name server subType}}}}}";
+
+        var (rStatus, rDoc, rErr) = await PostGraphQlAsync(token,
+            JsonSerializer.Serialize(new { query = reportQuery, variables = new { code } }));
+        if (rDoc is null) return (rStatus, null, rErr);
+        using var reportDoc = rDoc;
+
+        if (!reportDoc.RootElement.TryGetProperty("data", out var rData) ||
+            !rData.TryGetProperty("reportData", out var rd) ||
+            !rd.TryGetProperty("report", out var report) ||
+            report.ValueKind != JsonValueKind.Object)
+        {
+            var gqlErr = TryGetGqlError(reportDoc.RootElement);
+            return (404, null, gqlErr ?? "No such Warcraft Logs report, or it is private.");
+        }
+
+        var title = GetString(report, "title");
+        var startTime = GetLong(report, "startTime");
+        var zone = GetNestedName(report, "zone");
+
+        // Distinct players by name (a name can appear once per report; dedupe defensively).
+        var actors = new List<ReportPlayer>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (report.TryGetProperty("masterData", out var master) &&
+            master.TryGetProperty("actors", out var actorArr) &&
+            actorArr.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var a in actorArr.EnumerateArray())
+            {
+                var name = GetString(a, "name");
+                if (string.IsNullOrWhiteSpace(name) || !seen.Add(name)) continue;
+                actors.Add(new ReportPlayer(name, GetString(a, "server"), NullIfEmpty(GetString(a, "subType"))));
+            }
+        }
+
+        if (actors.Count == 0)
+            return (200, new ReportPlayers(code, NullIfEmpty(title), startTime, NullIfEmpty(zone),
+                new List<ReportPlayer>(), 0), null);
+
+        // ── Query B: which of those are in our guild? (one batched request) ──
+        // Alias one character(...) field per player; keep those whose guild list
+        // contains our guild name. A null node = unknown character = excluded.
+        var region = _opt.GuildRegion;
+        var sb = new StringBuilder("query{characterData{");
+        for (var i = 0; i < actors.Count; i++)
+        {
+            sb.Append($"c{i}:character(name:{JsonSerializer.Serialize(actors[i].Name)},")
+              .Append($"serverSlug:{JsonSerializer.Serialize(actors[i].Realm)},")
+              .Append($"serverRegion:{JsonSerializer.Serialize(region)}){{guilds{{name}}}} ");
+        }
+        sb.Append("}}");
+
+        var (gStatus, gDoc, gErr) = await PostGraphQlAsync(token,
+            JsonSerializer.Serialize(new { query = sb.ToString() }));
+        if (gDoc is null) return (gStatus, null, gErr);
+        using var guildDoc = gDoc;
+
+        if (!guildDoc.RootElement.TryGetProperty("data", out var gData) ||
+            !gData.TryGetProperty("characterData", out var cData) ||
+            cData.ValueKind != JsonValueKind.Object)
+        {
+            var gqlErr = TryGetGqlError(guildDoc.RootElement);
+            return (502, null, gqlErr ?? "Could not verify guild membership on Warcraft Logs.");
+        }
+
+        var kept = new List<ReportPlayer>();
+        for (var i = 0; i < actors.Count; i++)
+        {
+            if (cData.TryGetProperty($"c{i}", out var ch) &&
+                ch.ValueKind == JsonValueKind.Object &&
+                InGuild(ch)) kept.Add(actors[i]);
+        }
+
+        return (200, new ReportPlayers(code, NullIfEmpty(title), startTime, NullIfEmpty(zone),
+            kept, actors.Count - kept.Count), null);
+    }
+
+    /// <summary>True if the character's <c>guilds</c> list contains our guild name.</summary>
+    private bool InGuild(JsonElement character)
+    {
+        if (!character.TryGetProperty("guilds", out var guilds) || guilds.ValueKind != JsonValueKind.Array)
+            return false;
+        foreach (var g in guilds.EnumerateArray())
+        {
+            if (GetString(g, "name").Equals(_opt.GuildName, StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+        return false;
+    }
+
+    /// <summary>POSTs a GraphQL body to Warcraft Logs and parses the JSON response.
+    /// Returns (status, doc, error): on success doc is non-null and the caller owns
+    /// it (dispose); on failure doc is null and error carries a friendly message.</summary>
+    private async Task<(int Status, JsonDocument? Doc, string? Error)> PostGraphQlAsync(string token, string body)
+    {
+        var http = _httpFactory.CreateClient();
+        http.Timeout = TimeSpan.FromSeconds(_opt.RequestTimeoutSeconds);
+
+        using var req = new HttpRequestMessage(HttpMethod.Post, _opt.GraphQlUrl);
+        req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        req.Content = new StringContent(body, Encoding.UTF8, "application/json");
+
+        HttpResponseMessage r;
+        try { r = await http.SendAsync(req); }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            _log.LogWarning(ex, "Warcraft Logs request failed/timed out");
+            return (504, null, "Warcraft Logs is not responding right now. Try again in a minute.");
+        }
+
+        if (r.StatusCode == (HttpStatusCode)429)
+            return (429, null, "Warcraft Logs is rate-limiting the guild tools right now. Try again in a minute.");
+        if (!r.IsSuccessStatusCode)
+            return (502, null, "Warcraft Logs API returned " + (int)r.StatusCode);
+
+        return (200, JsonDocument.Parse(await r.Content.ReadAsStringAsync()), null);
+    }
+
+    private static string? NullIfEmpty(string s) => string.IsNullOrWhiteSpace(s) ? null : s;
+
     /// <summary>Officer diagnostics: the guild's current v2 points budget
     /// ({ limitPerHour, pointsSpentThisHour, pointsResetIn }). Always live — the
     /// whole point is to see the budget right now — but the query itself costs a
