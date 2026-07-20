@@ -287,8 +287,18 @@ async function getWclToken(env) {
   return j.access_token;
 }
 
+// The report list changes rarely, so we cache the assembled result at the edge.
+// This keeps us well under the Warcraft Logs v2 API's hourly points budget — a
+// burst of refreshes reuses one cached copy instead of re-paging the API (which
+// is what earns a 429). Public data, so caching + reuse is safe.
+const WCL_CACHE_TTL = 300; // seconds
+function wclCacheKey() {
+  const id = encodeURIComponent(`${WCL_HOST}|${WCL_GUILD_REGION}|${WCL_GUILD_SERVER}|${WCL_GUILD_NAME}`);
+  return new Request('https://wcl-reports.cache/' + id, { method: 'GET' });
+}
+
 // Pull every report for the guild (paged, newest first) and return a slim list.
-async function handleWclReports(request, url, env) {
+async function handleWclReports(request, url, env, ctx) {
   if (request.method !== 'GET') {
     return new Response('Method not allowed', { status: 405, headers: corsHeaders() });
   }
@@ -303,6 +313,13 @@ async function handleWclReports(request, url, env) {
   if (!WCL_GUILD_SERVER || !WCL_GUILD_REGION) {
     return jsonResponse(501, { error: 'not_configured', detail: 'Warcraft Logs guild is not set on the Worker yet.' });
   }
+
+  // Serve a fresh cached copy if we have one (the gate above already ran).
+  const cache = caches.default;
+  const cacheKey = wclCacheKey();
+  const hit = await cache.match(cacheKey);
+  if (hit) return hit;
+
   const token = await getWclToken(env);
   if (!token) {
     return jsonResponse(501, { error: 'not_configured', detail: 'Warcraft Logs API credentials are not set on the Worker yet.' });
@@ -324,6 +341,16 @@ async function handleWclReports(request, url, env) {
           name: WCL_GUILD_NAME, server: WCL_GUILD_SERVER, region: WCL_GUILD_REGION, page
         } })
       });
+      // Rate limited — the WCL v2 hourly points budget is spent. Serve a stale
+      // cached copy if one exists, otherwise ask the user to wait it out.
+      if (r.status === 429) {
+        const stale = await cache.match(cacheKey);
+        if (stale) return stale;
+        return jsonResponse(429, {
+          error: 'rate_limited',
+          detail: 'Warcraft Logs is rate-limiting the guild tools right now. Try again in a minute.'
+        });
+      }
       if (!r.ok) return jsonResponse(502, { error: 'upstream', detail: 'Warcraft Logs API returned ' + r.status });
       const j = await r.json();
       const node = j && j.data && j.data.reportData && j.data.reportData.reports;
@@ -351,7 +378,13 @@ async function handleWclReports(request, url, env) {
 
   const guildUrl = `${WCL_HOST}/guild/${WCL_GUILD_REGION.toLowerCase()}/` +
     `${WCL_GUILD_SERVER}/${encodeURIComponent(WCL_GUILD_NAME)}`;
-  return jsonResponse(200, { guild: WCL_GUILD_NAME, guildUrl, reports });
+  const body = JSON.stringify({ guild: WCL_GUILD_NAME, guildUrl, reports });
+  const headers = { ...corsHeaders(), 'Content-Type': 'application/json', 'Cache-Control': `max-age=${WCL_CACHE_TTL}` };
+  const response = new Response(body, { status: 200, headers });
+  // Store a copy at the edge; waitUntil keeps it off the response's critical path.
+  const put = cache.put(cacheKey, response.clone());
+  if (ctx && ctx.waitUntil) ctx.waitUntil(put); else await put;
+  return response;
 }
 
 /* ─────────────────── Raid-Helper proxy (gated) ─────────────────── */
@@ -394,7 +427,7 @@ async function handleProxy(request, url, env) {
 
 /* ─────────────────────────── router ─────────────────────────── */
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     if (request.method === 'OPTIONS') {
       return new Response(null, { status: 204, headers: corsHeaders() });
     }
@@ -402,7 +435,7 @@ export default {
     const url = new URL(request.url);
     if (url.pathname === '/auth/login')    return handleLogin();
     if (url.pathname === '/auth/callback') return handleCallback(request, url, env);
-    if (url.pathname === '/wcl/reports')   return handleWclReports(request, url, env);
+    if (url.pathname === '/wcl/reports')   return handleWclReports(request, url, env, ctx);
 
     return handleProxy(request, url, env);
   }
