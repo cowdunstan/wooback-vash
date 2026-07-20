@@ -37,8 +37,20 @@
  */
 
 const RAID_HELPER    = 'https://raid-helper.xyz/api';
-// Origin allowed to call the proxy with fetch/XHR (the board page). Origin only.
-const ALLOWED_ORIGIN = 'https://cowdunstan.github.io';
+// Origins allowed to call the proxy with fetch/XHR (the app pages). Origin only.
+// The site is served from the custom domain (apex + www); the github.io URL is
+// kept so a call that fires before GitHub's redirect still works.
+const ALLOWED_ORIGINS = new Set([
+  'https://wooback.info',
+  'https://www.wooback.info',
+  'https://cowdunstan.github.io'
+]);
+// Echo the caller's Origin back only if it's allow-listed — CORS permits a
+// single origin, not a list. Returns null for a disallowed/absent origin.
+function allowedOrigin(request) {
+  const o = request.headers.get('Origin');
+  return o && ALLOWED_ORIGINS.has(o) ? o : null;
+}
 
 /* ─────────────────────── Warcraft Logs (v2 API) ───────────────────────
  * The logs.html app pulls the guild's report list through here so the API
@@ -93,15 +105,25 @@ const APP_BASE = 'https://wooback.info';
 // Session lifetime, seconds.
 const SESSION_TTL = 6 * 60 * 60;
 
-/* ───────────────────────────── CORS ───────────────────────────── */
+/* ───────────────────────────── CORS ─────────────────────────────
+ * corsHeaders() carries everything except Access-Control-Allow-Origin. The
+ * allowed origin is per-request (see allowedOrigin) and gets stamped on at the
+ * router via withCors, which keeps cached responses origin-agnostic. */
 function corsHeaders() {
   return {
-    'Access-Control-Allow-Origin': ALLOWED_ORIGIN,
     'Access-Control-Allow-Methods': 'GET, OPTIONS',
     'Access-Control-Allow-Headers': 'Authorization, Content-Type',
     'Access-Control-Max-Age': '86400',
     'Vary': 'Origin'
   };
+}
+// Stamp the resolved Allow-Origin onto an outgoing response. Rebuilds the
+// response so it works even when the headers are immutable (e.g. a cache hit).
+function withCors(response, origin) {
+  if (!origin) return response;
+  const r = new Response(response.body, response);
+  r.headers.set('Access-Control-Allow-Origin', origin);
+  return r;
 }
 function jsonResponse(status, obj) {
   return new Response(JSON.stringify(obj), {
@@ -428,15 +450,21 @@ async function handleProxy(request, url, env) {
 /* ─────────────────────────── router ─────────────────────────── */
 export default {
   async fetch(request, env, ctx) {
+    const origin = allowedOrigin(request);
+
     if (request.method === 'OPTIONS') {
-      return new Response(null, { status: 204, headers: corsHeaders() });
+      const headers = corsHeaders();
+      if (origin) headers['Access-Control-Allow-Origin'] = origin;
+      return new Response(null, { status: 204, headers });
     }
 
     const url = new URL(request.url);
-    if (url.pathname === '/auth/login')    return handleLogin();
-    if (url.pathname === '/auth/callback') return handleCallback(request, url, env);
-    if (url.pathname === '/wcl/reports')   return handleWclReports(request, url, env, ctx);
+    let response;
+    if (url.pathname === '/auth/login')         response = handleLogin();
+    else if (url.pathname === '/auth/callback') response = await handleCallback(request, url, env);
+    else if (url.pathname === '/wcl/reports')   response = await handleWclReports(request, url, env, ctx);
+    else                                        response = await handleProxy(request, url, env);
 
-    return handleProxy(request, url, env);
+    return withCors(response, origin);
   }
 };
