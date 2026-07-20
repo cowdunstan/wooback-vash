@@ -73,7 +73,9 @@ if (haveDb)
 // Liveness: never touches the database.
 app.MapGet("/healthz", () => Results.Ok(new { status = "ok" }));
 
-// Readiness: reports whether the DB is configured and reachable.
+// Readiness: reports whether the DB is configured and reachable. Opens a real
+// connection so a failure surfaces the underlying reason (host/auth/SSL/timeout)
+// rather than a bare "unreachable" — invaluable when wiring up Fly Postgres.
 app.MapGet("/readyz", async (IServiceProvider sp) =>
 {
     if (!haveDb) return Results.Ok(new { db = "not_configured" });
@@ -81,12 +83,13 @@ app.MapGet("/readyz", async (IServiceProvider sp) =>
     {
         using var scope = sp.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        var canConnect = await db.Database.CanConnectAsync();
-        return Results.Ok(new { db = canConnect ? "ok" : "unreachable" });
+        await db.Database.OpenConnectionAsync();
+        await db.Database.CloseConnectionAsync();
+        return Results.Ok(new { db = "ok" });
     }
     catch (Exception ex)
     {
-        return Results.Ok(new { db = "error", detail = ex.Message });
+        return Results.Ok(new { db = "unreachable", detail = ex.GetBaseException().Message });
     }
 });
 
