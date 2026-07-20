@@ -21,25 +21,13 @@
   </div>
 </div>
 
+<script src="menu.js"></script>
 <script>
-  // The .NET backend that handles Discord OAuth (server/WoobackVash.Api).
-  const AUTH_BASE = (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
-    ? 'http://localhost:8080'
-    : 'https://wooback-vash-api.fly.dev';
-
+  // API_BASE (the shared .NET backend host, which handles Discord OAuth) and
+  // validSession() are provided by menu.js.
   document.getElementById('signin').addEventListener('click', function(){
-    location.href = AUTH_BASE + '/auth/login';
+    location.href = API_BASE + '/auth/login';
   });
-
-  function validSession(tok){
-    if(!tok) return false;
-    try{
-      var p = tok.split('.')[0].replace(/-/g,'+').replace(/_/g,'/');
-      while(p.length % 4) p += '=';
-      var payload = JSON.parse(atob(p));
-      return payload.exp && payload.exp > Math.floor(Date.now()/1000);
-    }catch(e){ return false; }
-  }
 
   // Surface a denial / error passed back from the Worker in the URL fragment.
   (function(){

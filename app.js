@@ -585,15 +585,10 @@ const RH_WINDOW_DAYS = 7;
 // Raid-Helper rejects cross-origin browser requests, so every call routes through
 // our own CORS proxy (the .NET backend, server/WoobackVash.Api), which forwards
 // the path unchanged to https://raid-helper.xyz/api, adds the token, and returns
-// the CORS header the browser needs.
-const RH_PROXY = (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
-  ? 'http://localhost:8080'
-  : 'https://wooback-vash-api.fly.dev';
-function rhApiBase(){ return RH_PROXY; }
+// the CORS header the browser needs. Same host as everything else — API_BASE is
+// defined in menu.js, which board.html loads before this file.
+function rhApiBase(){ return API_BASE; }
 
-// The .NET backend also serves board save/load + loot/attendance. Same host as
-// the proxy + OAuth now that the cutover is done.
-const API_BASE = RH_PROXY;
 // The storage key for the current board: a Raid-Helper event id once one is
 // loaded, otherwise "default" for a manually built board.
 let currentBoardKey = 'default';

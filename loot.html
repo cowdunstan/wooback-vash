@@ -53,15 +53,7 @@
           <button class="hamburger" id="navToggle" aria-label="Menu" aria-expanded="false" aria-controls="navDrawer">
             <span></span><span></span><span></span>
           </button>
-          <nav class="nav-drawer" id="navDrawer">
-            <a href="home.html">Home</a>
-            <a href="logs.html">Warcraft Logs</a>
-            <a href="board.html" data-officer-only>Vash assignments</a>
-            <a href="attendance.html" data-officer-only>Attendance</a>
-            <a href="loot.html" class="active" data-officer-only>Loot log</a>
-            <a href="members.html" data-officer-only>Roster &amp; alts</a>
-            <a href="sheet.html">Loot sheet</a>
-          </nav>
+          <nav class="nav-drawer" id="navDrawer"></nav>
         </div>
         <span class="eyebrow">Raid record</span>
       </span>
@@ -103,10 +95,7 @@
 
 <script src="menu.js"></script>
 <script>
-// The .NET persistence API (same host as the board's saves).
-const API_BASE = (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
-  ? 'http://localhost:8080'
-  : 'https://wooback-vash-api.fly.dev';
+// API_BASE (the shared .NET backend host) is provided by menu.js.
 function authHeaders(extra){ return Object.assign({ 'Authorization': 'Bearer ' + sessionToken() }, extra || {}); }
 function esc(s){ return String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 function evKey(){ const v = document.getElementById('eventKey').value.trim(); return v || 'default'; }

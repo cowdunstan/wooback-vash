@@ -39,14 +39,7 @@
         <button class="hamburger" id="navToggle" aria-label="Menu" aria-expanded="false" aria-controls="navDrawer">
           <span></span><span></span><span></span>
         </button>
-        <nav class="nav-drawer" id="navDrawer">
-          <a href="home.html">Home</a>
-          <a href="logs.html" class="active">Warcraft Logs</a>
-          <a href="board.html" data-officer-only>Vash assignments</a>
-          <a href="attendance.html" data-officer-only>Attendance</a>
-          <a href="loot.html" data-officer-only>Loot log</a>
-          <a href="members.html" data-officer-only>Roster &amp; alts</a>
-        </nav>
+        <nav class="nav-drawer" id="navDrawer"></nav>
       </div>
       <span class="topbar-right">
         <span id="authWho" class="auth-who"></span>
@@ -76,11 +69,7 @@
 
 <script src="menu.js"></script>
 <script>
-  // The .NET backend that proxies the Warcraft Logs API (server/WoobackVash.Api).
-  const WCL_BASE = (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
-    ? 'http://localhost:8080'
-    : 'https://wooback-vash-api.fly.dev';
-
+  // API_BASE (the shared .NET backend host, which proxies Warcraft Logs) is provided by menu.js.
   function setStatus(msg, isErr){
     const el = document.getElementById('logStatus');
     el.textContent = msg || '';
@@ -142,7 +131,7 @@
     try{
       // Officers can force a live pull past the 30-min server cache (?fresh=1);
       // the server ignores the flag for non-officers, so this stays a safe no-op.
-      const url = WCL_BASE + '/wcl/reports' + (force ? '?fresh=1' : '');
+      const url = API_BASE + '/wcl/reports' + (force ? '?fresh=1' : '');
       const res = await fetch(url, {
         headers: { 'Authorization': 'Bearer ' + sessionToken() }
       });

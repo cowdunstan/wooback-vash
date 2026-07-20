@@ -41,6 +41,39 @@ function logout(){
   location.replace('index.html');
 }
 
+/* ───────────────────────── Shared API base ─────────────────────────
+   Every page talks to the same .NET backend (server/WoobackVash.Api): Discord
+   OAuth, board save/load, loot, attendance, and the Warcraft-Logs / Raid-Helper
+   proxies all live behind this host. Localhost points at the dev server on 8080;
+   everything else at the deployed Fly app. Defined here so no page redefines it. */
+const API_BASE = (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
+  ? 'http://localhost:8080'
+  : 'https://wooback-vash-api.fly.dev';
+
+/* ───────────────────────── Shared nav links ─────────────────────────
+   The one source of truth for the hamburger drawer, rendered on every page by
+   renderNav() below. Officer-only links carry `officer:true` and are hidden for
+   home-tier members by the same [data-officer-only] pass used elsewhere. */
+const NAV_LINKS = [
+  { href:'home.html',       label:'Home' },
+  { href:'logs.html',       label:'Warcraft Logs' },
+  { href:'board.html',      label:'Vash assignments', officer:true },
+  { href:'attendance.html', label:'Attendance',       officer:true },
+  { href:'loot.html',       label:'Loot log',         officer:true },
+  { href:'members.html',    label:'Roster & alts',    officer:true },
+  { href:'sheet.html',      label:'Loot sheet' }
+];
+
+function renderNav(drawer){
+  const here = (location.pathname.split('/').pop() || 'index.html').toLowerCase();
+  drawer.innerHTML = NAV_LINKS.map(function(l){
+    const active = l.href.toLowerCase() === here ? ' class="active"' : '';
+    const officer = l.officer ? ' data-officer-only' : '';
+    const label = l.label.replace(/&/g, '&amp;');
+    return '<a href="' + l.href + '"' + active + officer + '>' + label + '</a>';
+  }).join('');
+}
+
 /* ───────────────────────── Hamburger menu ───────────────────────── */
 (function(){
   function ready(fn){
@@ -50,6 +83,9 @@ function logout(){
   ready(function(){
     const toggle = document.getElementById('navToggle');
     const drawer = document.getElementById('navDrawer');
+
+    // Build the nav from the shared list before anything reads its links.
+    if(drawer) renderNav(drawer);
 
     // Show who's signed in, wherever a page exposes the slot.
     const who = document.getElementById('authWho');
