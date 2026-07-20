@@ -51,6 +51,26 @@ public static class MembersEndpoints
 
         var chars = app.MapGroup("/api/characters");
 
+        // Characters not yet linked to a member. Loot/attendance auto-creates these
+        // by name (memberId = null); officers claim them onto a member from the UI.
+        // Pass ?linked=false (default) for orphans; ?linked=true lists claimed ones.
+        chars.MapGet("", async (HttpContext ctx, SessionTokenService tokens) =>
+        {
+            var (_, error) = ctx.RequireOfficer(tokens);
+            if (error is not null) return error;
+            var db = ctx.RequestServices.GetService<AppDbContext>();
+            if (db is null) return DbUnavailable();
+
+            var linkedRaw = ctx.Request.Query["linked"].ToString();
+            var linked = linkedRaw.Equals("true", StringComparison.OrdinalIgnoreCase);
+
+            var q = db.Characters.AsNoTracking()
+                .Where(c => linked ? c.MemberId != null : c.MemberId == null)
+                .OrderBy(c => c.Name)
+                .Select(c => new { id = c.Id, memberId = c.MemberId, name = c.Name, cls = c.Class, spec = c.Spec, realm = c.Realm, isMain = c.IsMain, notes = c.Notes });
+            return Results.Json(await q.ToListAsync());
+        });
+
         chars.MapPost("", async (HttpContext ctx, SessionTokenService tokens, CharacterInput input) =>
         {
             var (_, error) = ctx.RequireOfficer(tokens);

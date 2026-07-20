@@ -1,0 +1,327 @@
+<meta charset="utf-8">
+<script>
+/* Officer gate — same as loot.html. Identity-link management is an officer tool;
+   the .NET API enforces it on every call, this just decides whether to show the
+   page (redirect to index.html if not signed in, home.html if not an officer). */
+(function(){
+  var m = location.hash.match(/(?:^#|&)session=([^&]+)/);
+  if(m){
+    try{ localStorage.setItem('vashj_session', decodeURIComponent(m[1])); }catch(e){}
+    history.replaceState(null, '', location.pathname + location.search);
+  }
+  function payload(tok){
+    if(!tok) return null;
+    try{
+      var p = tok.split('.')[0].replace(/-/g,'+').replace(/_/g,'/');
+      while(p.length % 4) p += '=';
+      return JSON.parse(atob(p));
+    }catch(e){ return null; }
+  }
+  var tok = null;
+  try{ tok = localStorage.getItem('vashj_session'); }catch(e){}
+  var pl = payload(tok);
+  if(!pl || !pl.exp || pl.exp <= Math.floor(Date.now()/1000)){
+    try{ localStorage.removeItem('vashj_session'); }catch(e){}
+    location.replace('index.html');
+  } else if(!pl.officer){
+    location.replace('home.html');
+  }
+})();
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+<style>
+  .rl-toolbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:8px}
+  .rl-card{background:var(--panel,#0d1a17);border:1px solid var(--panel-line,#1e332d);border-radius:10px;padding:16px;margin-top:14px}
+  .rl-card h2{font-family:'Cinzel',serif;font-size:16px;margin:0 0 4px}
+  .rl-card .card-sub{color:var(--text-dim,#7f9a92);font-size:12px;margin:0 0 12px}
+  .rl-form{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+  .rl-form input,.rl-form select{background:#0a1815;border:1px solid var(--panel-line,#1e332d);color:var(--text,#dfeee9);border-radius:6px;padding:7px 9px;font-size:13px;font-family:'Inter'}
+  .rl-form input.name{min-width:130px}.rl-form input.sm{min-width:90px}
+  /* Member roster */
+  .mem{border:1px solid var(--panel-line,#1e332d);border-radius:10px;margin-bottom:16px;overflow:hidden;background:var(--panel,#0d1a17)}
+  .mem-head{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:baseline;padding:12px 16px;border-bottom:1px solid var(--panel-line,#1e332d)}
+  .mem-head .mem-name{font-family:'Cinzel',serif;font-size:15px;font-weight:700}
+  .mem-head .mem-user{color:var(--text-dim,#7f9a92);font-size:12px}
+  .mem-head .mem-seen{margin-left:auto;color:var(--text-dim,#7f9a92);font-size:11px}
+  table.rl{width:100%;border-collapse:collapse;font-size:13px}
+  table.rl th{text-align:left;color:var(--text-dim,#7f9a92);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.6px;padding:6px 12px;border-bottom:1px solid var(--panel-line,#1e332d)}
+  table.rl td{padding:8px 12px;border-bottom:1px solid rgba(30,51,45,.5);vertical-align:middle}
+  table.rl tr:last-child td{border-bottom:none}
+  table.rl .muted{color:var(--text-dim,#7f9a92)}
+  table.rl input,table.rl select{background:#0a1815;border:1px solid var(--panel-line,#1e332d);color:var(--text,#dfeee9);border-radius:6px;padding:5px 7px;font-size:12.5px;font-family:'Inter';max-width:100%}
+  .rl-empty{color:var(--text-dim,#7f9a92);padding:12px;font-size:13px}
+  .row-actions{display:flex;flex-wrap:wrap;gap:6px;justify-content:flex-end}
+  .rl-del{background:none;border:none;color:var(--amber,#e0a53d);cursor:pointer;font-size:13px;padding:2px 6px}
+  .lnk{background:none;border:none;color:var(--text-dim,#7f9a92);cursor:pointer;font-size:12px;padding:2px 6px;text-decoration:underline}
+  .lnk:hover{color:var(--text,#dfeee9)}
+  .pill{display:inline-block;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600}
+  .pill-main{background:rgba(46,230,171,.16);color:#2ee6ab}
+  .pill-alt{background:rgba(127,176,242,.14);color:#7fb0f2}
+  .mem-add{padding:10px 16px;border-top:1px solid rgba(30,51,45,.5)}
+  .cls{color:var(--text-dim,#7f9a92)}
+</style>
+
+<div class="app">
+  <div class="wrap">
+    <div class="authbar">
+      <span class="authbar-left">
+        <div class="nav">
+          <button class="hamburger" id="navToggle" aria-label="Menu" aria-expanded="false" aria-controls="navDrawer">
+            <span></span><span></span><span></span>
+          </button>
+          <nav class="nav-drawer" id="navDrawer">
+            <a href="home.html">Home</a>
+            <a href="logs.html">Warcraft Logs</a>
+            <a href="board.html" data-officer-only>Vash assignments</a>
+            <a href="loot.html" data-officer-only>Loot &amp; attendance</a>
+            <a href="members.html" class="active" data-officer-only>Roster &amp; alts</a>
+            <a href="sheet.html">Loot sheet</a>
+          </nav>
+        </div>
+        <span class="eyebrow">Identity links</span>
+      </span>
+      <span class="authbar-right">
+        <span id="authWho" class="auth-who"></span>
+        <button class="btn-ghost" onclick="logout()">Sign out</button>
+      </span>
+    </div>
+
+    <h1>Roster &amp; Alts</h1>
+    <p class="subtitle">Manage the Discord &#8596; WoW main &#8596; alts links. Set each member's main, add or edit alts, reassign a character to another member, and claim unlinked characters created by loot &amp; attendance.</p>
+
+    <div class="rl-toolbar">
+      <button class="btn-primary" onclick="loadAll()">Reload</button>
+      <span id="rlStatus" style="font-size:11.5px;color:var(--text-dim);min-height:15px;"></span>
+    </div>
+
+    <div id="members"></div>
+
+    <div class="rl-card">
+      <h2>Unlinked characters</h2>
+      <p class="card-sub">Characters created by loot &amp; attendance that aren't attached to any member yet. Assign one to claim it onto a member.</p>
+      <table class="rl"><thead><tr><th>Character</th><th>Class / spec</th><th>Realm</th><th style="width:38%">Assign to member</th></tr></thead>
+        <tbody id="orphanBody"><tr><td colspan="4" class="rl-empty">Nothing loaded.</td></tr></tbody>
+      </table>
+    </div>
+
+    <footer>wooback guild tools — identity links are saved to the guild database.</footer>
+  </div>
+</div>
+
+<script src="menu.js"></script>
+<script>
+// The .NET persistence API (same host as loot.html).
+const API_BASE = 'https://wooback-vash-api.fly.dev';
+function authHeaders(extra){ return Object.assign({ 'Authorization': 'Bearer ' + sessionToken() }, extra || {}); }
+function esc(s){ return String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function setStatus(msg, isErr){ const el = document.getElementById('rlStatus'); el.textContent = msg || ''; el.style.color = isErr ? 'var(--amber)' : 'var(--text-dim)'; }
+
+// A fetch wrapper that maps the shared auth failures to friendly UX.
+async function api(path, opts){
+  const res = await fetch(API_BASE + path, Object.assign({ headers: authHeaders(opts && opts.body ? {'Content-Type':'application/json'} : null) }, opts));
+  if(res.status === 401){ setStatus('Session expired — signing out…', true); setTimeout(logout, 1200); throw new Error('401'); }
+  if(res.status === 403){ setStatus('Officer access required.', true); throw new Error('403'); }
+  return res;
+}
+
+function fmtWhen(iso){ try{ const d = new Date(iso); return isNaN(d) ? '' : d.toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'}); }catch(e){ return ''; } }
+
+// In-memory copies, so we can build member dropdowns and reassign without re-fetching.
+let MEMBERS = [];
+let ORPHANS = [];
+
+// Build a <select> of members with one preselected (or "— none —").
+function memberSelect(selectedId, onchange){
+  let html = '<select onchange="' + onchange + '">';
+  html += '<option value="">— unassigned —</option>';
+  for(const m of MEMBERS){
+    const sel = m.id === selectedId ? ' selected' : '';
+    const label = m.displayName || m.discordUsername || m.id;
+    html += '<option value="' + esc(m.id) + '"' + sel + '>' + esc(label) + '</option>';
+  }
+  return html + '</select>';
+}
+
+function clsSpec(c){
+  const parts = [c.cls, c.spec].filter(Boolean).map(esc);
+  return parts.length ? '<span class="cls">' + parts.join(' · ') + '</span>' : '<span class="muted">—</span>';
+}
+
+function renderMembers(members){
+  MEMBERS = members;
+  const root = document.getElementById('members');
+  if(!members.length){ root.innerHTML = '<div class="rl-card"><p class="rl-empty">No members yet. Members are created automatically when someone signs in.</p></div>'; return; }
+  root.innerHTML = members.map(m => {
+    const label = esc(m.displayName || m.discordUsername || '(unknown)');
+    const user = m.discordUsername ? '@' + esc(m.discordUsername) : '';
+    const seen = m.lastSeenAt ? 'Last seen ' + esc(fmtWhen(m.lastSeenAt)) : '';
+    let rows;
+    if(!m.characters || !m.characters.length){
+      rows = '<tr><td colspan="5" class="rl-empty">No characters linked yet.</td></tr>';
+    } else {
+      rows = m.characters.map(c => {
+        const badge = c.isMain
+          ? '<span class="pill pill-main">Main</span>'
+          : '<button class="lnk" onclick="setMain(\'' + c.id + '\')">Make main</button>';
+        const reassign = memberSelect(m.id, 'reassign(\'' + c.id + '\', this.value)');
+        return '<tr>' +
+          '<td><strong>' + esc(c.name) + '</strong>' + (c.isMain ? '' : ' <span class="pill pill-alt">Alt</span>') + '</td>' +
+          '<td>' + clsSpec(c) + '</td>' +
+          '<td class="muted">' + (c.realm ? esc(c.realm) : '—') + '</td>' +
+          '<td>' + badge + '</td>' +
+          '<td><div class="row-actions">' + reassign +
+            '<button class="lnk" onclick="editChar(\'' + c.id + '\')">Edit</button>' +
+            '<button class="rl-del" title="Delete" onclick="delChar(\'' + c.id + '\',\'' + esc(c.name).replace(/'/g,"\\'") + '\')">✕</button>' +
+          '</div></td>' +
+        '</tr>';
+      }).join('');
+    }
+    return '<div class="mem">' +
+      '<div class="mem-head"><span class="mem-name">' + label + '</span>' +
+        (user ? '<span class="mem-user">' + user + '</span>' : '') +
+        (seen ? '<span class="mem-seen">' + seen + '</span>' : '') +
+      '</div>' +
+      '<table class="rl"><thead><tr><th>Character</th><th>Class / spec</th><th>Realm</th><th>Role</th><th></th></tr></thead>' +
+        '<tbody>' + rows + '</tbody></table>' +
+      '<div class="mem-add"><div class="rl-form">' +
+        '<input class="name" id="add-name-' + m.id + '" placeholder="Character name">' +
+        '<input class="sm" id="add-class-' + m.id + '" placeholder="Class">' +
+        '<input class="sm" id="add-spec-' + m.id + '" placeholder="Spec">' +
+        '<input class="sm" id="add-realm-' + m.id + '" placeholder="Realm">' +
+        '<label style="font-size:12px;color:var(--text-dim);display:flex;gap:5px;align-items:center;"><input type="checkbox" id="add-main-' + m.id + '"> main</label>' +
+        '<button class="btn-ghost" onclick="addChar(\'' + m.id + '\')">Add character</button>' +
+      '</div></div>' +
+    '</div>';
+  }).join('');
+}
+
+function renderOrphans(rows){
+  ORPHANS = rows;
+  const b = document.getElementById('orphanBody');
+  if(!rows.length){ b.innerHTML = '<tr><td colspan="4" class="rl-empty">No unlinked characters — every character is attached to a member.</td></tr>'; return; }
+  b.innerHTML = rows.map(c =>
+    '<tr>' +
+      '<td><strong>' + esc(c.name) + '</strong></td>' +
+      '<td>' + clsSpec(c) + '</td>' +
+      '<td class="muted">' + (c.realm ? esc(c.realm) : '—') + '</td>' +
+      '<td>' + memberSelect('', 'reassign(\'' + c.id + '\', this.value)') + '</td>' +
+    '</tr>'
+  ).join('');
+}
+
+async function loadAll(){
+  setStatus('Loading…');
+  try{
+    const [mRes, oRes] = await Promise.all([
+      api('/api/members'),
+      api('/api/characters?linked=false')
+    ]);
+    if(!mRes.ok){ setStatus('Could not load members (HTTP ' + mRes.status + ').', true); return; }
+    renderMembers(await mRes.json());
+    if(oRes.ok){ renderOrphans(await oRes.json()); }
+    setStatus('Loaded ' + MEMBERS.length + ' member' + (MEMBERS.length === 1 ? '' : 's') + '.');
+  }catch(err){ if(!['401','403'].includes(err.message)) setStatus('Could not reach the guild database.', true); }
+}
+
+async function putChar(id, body, okMsg){
+  try{
+    const res = await api('/api/characters/' + encodeURIComponent(id), { method:'PUT', body: JSON.stringify(body) });
+    if(!res.ok){ setStatus('Update failed (HTTP ' + res.status + ').', true); return; }
+    if(okMsg) setStatus(okMsg);
+    loadAll();
+  }catch(err){ if(!['401','403'].includes(err.message)) setStatus('Could not reach the guild database.', true); }
+}
+
+// Look up a character across members + orphans by id (for edits that must send the full body).
+function findChar(id){
+  for(const m of MEMBERS){ for(const c of (m.characters||[])){ if(c.id === id) return { c, memberId: m.id }; } }
+  for(const c of ORPHANS){ if(c.id === id) return { c, memberId: null }; }
+  return null;
+}
+
+function charBody(c, over){
+  return Object.assign({
+    memberId: c.memberId ?? null,
+    name: c.name,
+    class: c.cls ?? null,
+    spec: c.spec ?? null,
+    realm: c.realm ?? null,
+    isMain: c.isMain,
+    notes: c.notes ?? null
+  }, over || {});
+}
+
+function setMain(id){
+  const found = findChar(id);
+  if(!found) return;
+  putChar(id, charBody(Object.assign({}, found.c, { memberId: found.memberId }), { isMain: true }), 'Main updated.');
+}
+
+function reassign(id, newMemberId){
+  const found = findChar(id);
+  if(!found) return;
+  const base = Object.assign({}, found.c, { memberId: found.memberId });
+  // Moving away from the current member clears the main flag so two mains can't collide.
+  const keepMain = !!(newMemberId && found.memberId === newMemberId && base.isMain);
+  const wasOrphan = found.memberId == null;
+  const msg = newMemberId ? (wasOrphan ? 'Assigned.' : 'Reassigned.') : 'Unassigned.';
+  putChar(id, charBody(base, { memberId: newMemberId || null, isMain: keepMain }), msg);
+}
+
+async function addChar(memberId){
+  const name = document.getElementById('add-name-' + memberId).value.trim();
+  if(!name){ setStatus('Enter a character name.', true); return; }
+  const body = {
+    memberId: memberId,
+    name: name,
+    class: document.getElementById('add-class-' + memberId).value.trim() || null,
+    spec: document.getElementById('add-spec-' + memberId).value.trim() || null,
+    realm: document.getElementById('add-realm-' + memberId).value.trim() || null,
+    isMain: document.getElementById('add-main-' + memberId).checked
+  };
+  try{
+    const res = await api('/api/characters', { method:'POST', body: JSON.stringify(body) });
+    if(!res.ok){ setStatus('Add failed (HTTP ' + res.status + ').', true); return; }
+    setStatus('Added ' + name + '.');
+    loadAll();
+  }catch(err){ if(!['401','403'].includes(err.message)) setStatus('Could not reach the guild database.', true); }
+}
+
+function editChar(id){
+  const found = findChar(id);
+  if(!found) return;
+  const c = found.c;
+  const name = prompt('Character name:', c.name);
+  if(name === null) return;
+  if(!name.trim()){ setStatus('Name cannot be empty.', true); return; }
+  const cls = prompt('Class:', c.cls || '');
+  if(cls === null) return;
+  const spec = prompt('Spec:', c.spec || '');
+  if(spec === null) return;
+  const realm = prompt('Realm:', c.realm || '');
+  if(realm === null) return;
+  const notes = prompt('Notes:', c.notes || '');
+  if(notes === null) return;
+  putChar(id, charBody(Object.assign({}, c, { memberId: found.memberId }), {
+    name: name.trim(),
+    class: cls.trim() || null,
+    spec: spec.trim() || null,
+    realm: realm.trim() || null,
+    notes: notes.trim() || null
+  }), 'Saved ' + name.trim() + '.');
+}
+
+async function delChar(id, name){
+  if(!confirm('Delete character "' + name + '"? This cannot be undone.')) return;
+  try{
+    const res = await api('/api/characters/' + encodeURIComponent(id), { method:'DELETE' });
+    if(!res.ok){ setStatus('Delete failed (HTTP ' + res.status + ').', true); return; }
+    setStatus('Deleted ' + name + '.');
+    loadAll();
+  }catch(err){ if(!['401','403'].includes(err.message)) setStatus('Could not reach the guild database.', true); }
+}
+
+loadAll();
+</script>
