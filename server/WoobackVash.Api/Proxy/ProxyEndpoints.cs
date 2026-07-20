@@ -24,7 +24,7 @@ public static class ProxyEndpoints
             IOptions<RaidHelperOptions> opt,
             IHttpClientFactory httpFactory) =>
         {
-            var session = Authenticate(ctx, tokens);
+            var session = ctx.GetSession(tokens);
             if (session is null)
                 return Results.Json(new { error = "unauthorized", detail = "Sign-in required." }, statusCode: 401);
             if (!session.Officer)
@@ -58,24 +58,12 @@ public static class ProxyEndpoints
             SessionTokenService tokens,
             WarcraftLogsService wcl) =>
         {
-            var session = Authenticate(ctx, tokens);
+            var session = ctx.GetSession(tokens);
             if (session is null)
                 return Results.Json(new { error = "unauthorized", detail = "Sign-in required." }, statusCode: 401);
 
             var (status, body) = await wcl.GetReportsAsync();
             return Results.Text(body, "application/json", statusCode: status);
         });
-    }
-
-    // Extract and verify the Bearer session token, matching the Worker's
-    // /^Bearer\s+(.+)$/i gate.
-    private static SessionPayload? Authenticate(HttpContext ctx, SessionTokenService tokens)
-    {
-        var auth = ctx.Request.Headers.Authorization.ToString();
-        if (string.IsNullOrEmpty(auth)) return null;
-        const string prefix = "Bearer ";
-        if (!auth.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) return null;
-        var token = auth[prefix.Length..].Trim();
-        return string.IsNullOrEmpty(token) ? null : tokens.Verify(token);
     }
 }

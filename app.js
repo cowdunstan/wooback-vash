@@ -497,6 +497,80 @@ function exportImage(){
   });
 }
 
+/* ───────────────────────── Board save / load ─────────────────────────
+   Officers persist the whole board (guild name, slot counts, roster and
+   assignments) to the .NET API under currentBoardKey — the loaded Raid-Helper
+   event, or "default" for a hand-built board. Saving is explicit (the "Save
+   layout" button); loading is explicit too so it never clobbers a fresh import. */
+function setBoardStatus(msg, isErr){
+  const el = document.getElementById('boardStatus');
+  if(!el) return;
+  el.textContent = msg || '';
+  el.style.color = isErr ? 'var(--amber)' : 'var(--text-dim)';
+}
+
+// The exact in-memory board state, as saved. Mirrors what renderAll() reads.
+function boardSnapshot(){
+  return {
+    guildName: document.getElementById('guildName').value || '',
+    counts: counts,
+    roster: roster,
+    assignments: assignments,
+    idCounter: idCounter
+  };
+}
+
+// Restore a saved snapshot into the live state and re-render.
+function restoreBoard(s){
+  if(!s || typeof s !== 'object') return;
+  if(typeof s.guildName === 'string') document.getElementById('guildName').value = s.guildName;
+  if(s.counts && typeof s.counts === 'object') counts = s.counts;
+  if(Array.isArray(s.roster)) roster = s.roster;
+  if(s.assignments && typeof s.assignments === 'object') assignments = s.assignments;
+  if(typeof s.idCounter === 'number') idCounter = s.idCounter;
+  renderAll();
+}
+
+async function saveBoard(){
+  const key = currentBoardKey || 'default';
+  setBoardStatus('Saving…');
+  try {
+    const res = await fetch(`${API_BASE}/api/board?key=${encodeURIComponent(key)}`, {
+      method: 'PUT',
+      headers: Object.assign({ 'Content-Type': 'application/json' }, rhHeaders()),
+      body: JSON.stringify({ state: boardSnapshot(), title: document.getElementById('guildName').value || null })
+    });
+    if(res.status === 401){ setBoardStatus('Session expired — sign in again.', true); return; }
+    if(res.status === 403){ setBoardStatus('Officer access required.', true); return; }
+    if(!res.ok){ setBoardStatus('Save failed (HTTP ' + res.status + ').', true); return; }
+    setBoardStatus(key === 'default' ? 'Saved the default board.' : 'Saved for this event.');
+  } catch(err){
+    setBoardStatus('Could not reach the save service.', true);
+    console.error('Board save failed:', err);
+  }
+}
+
+async function loadBoard(){
+  const key = currentBoardKey || 'default';
+  setBoardStatus('Loading saved…');
+  try {
+    const res = await fetch(`${API_BASE}/api/board?key=${encodeURIComponent(key)}`, { headers: rhHeaders() });
+    if(res.status === 401){ setBoardStatus('Session expired — sign in again.', true); return; }
+    if(res.status === 403){ setBoardStatus('Officer access required.', true); return; }
+    if(!res.ok){ setBoardStatus('Load failed (HTTP ' + res.status + ').', true); return; }
+    const data = await res.json();
+    if(!data || !data.found){
+      setBoardStatus(key === 'default' ? 'No saved default board yet.' : 'No saved layout for this event yet.');
+      return;
+    }
+    restoreBoard(data.state);
+    setBoardStatus('Loaded the saved layout.');
+  } catch(err){
+    setBoardStatus('Could not reach the save service.', true);
+    console.error('Board load failed:', err);
+  }
+}
+
 /* ───────────────────────── Raid-Helper API integration ─────────────────────────
    Press "Load events" to list this server's events, then pick one to pull its
    signups onto the board. There is no token in this page: the Raid-Helper API
@@ -514,6 +588,13 @@ const RH_WINDOW_DAYS = 7;
 // CORS header the browser needs.
 const RH_PROXY = 'https://wooback-vash.cowdunstan.workers.dev';
 function rhApiBase(){ return RH_PROXY; }
+
+// The .NET persistence API (board save/load). Same host that will serve the
+// proxy + OAuth after cutover; for now the board talks to it directly.
+const API_BASE = 'https://wooback-vash-api.fly.dev';
+// The storage key for the current board: a Raid-Helper event id once one is
+// loaded, otherwise "default" for a manually built board.
+let currentBoardKey = 'default';
 
 // Raid-Helper signup buttons that represent a status rather than a class.
 const RH_STATUS_MAP = {
@@ -642,6 +723,8 @@ function loadSelectedEvent(){
 // Fetch one event's signups and drop them onto the board.
 async function fetchEventById(eventId){
   if(!eventId){ setRhStatus('No event id given.', true); return; }
+  // Saves/loads for this board now key off the loaded event.
+  currentBoardKey = String(eventId);
   setRhStatus('Loading signups…');
 
   let data;

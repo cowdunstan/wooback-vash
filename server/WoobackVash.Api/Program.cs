@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
+using WoobackVash.Api.Api;
 using WoobackVash.Api.Auth;
 using WoobackVash.Api.Config;
 using WoobackVash.Api.Data;
@@ -89,13 +90,17 @@ app.MapGet("/readyz", async (IServiceProvider sp) =>
     }
 });
 
-app.MapGet("/", () => Results.Ok(new { service = "wooback-vash-api", phase = 2 }));
+app.MapGet("/", () => Results.Ok(new { service = "wooback-vash-api", phase = 3 }));
 
 // Discord OAuth login/callback (Phase 1).
 app.MapAuthEndpoints();
 
 // Gated Raid-Helper + Warcraft Logs proxies (Phase 2).
 app.MapProxyEndpoints();
+
+// Persistence: Vash board save/load + identity links (Phase 3).
+app.MapBoardEndpoints();
+app.MapMembersEndpoints();
 
 app.Run();
 

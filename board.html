@@ -90,9 +90,12 @@
         </div>
       </div>
       <div class="spacer"></div>
+      <button class="btn-ghost" onclick="loadBoard()">Load saved</button>
+      <button class="btn-ghost" onclick="saveBoard()">Save layout</button>
       <button class="btn-ghost" onclick="clearAll()">Clear board</button>
       <button class="btn-primary" onclick="exportImage()">Export PNG</button>
     </div>
+    <div id="boardStatus" style="font-size:11.5px;color:var(--text-dim);margin:-4px 0 10px;min-height:15px;"></div>
 
     <div class="roster-panel">
       <div class="api-block">

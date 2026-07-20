@@ -40,6 +40,8 @@ public class AppDbContext : DbContext
         {
             // Store the snapshot as jsonb, not text — lets us query into it later.
             e.Property(x => x.State).HasColumnType("jsonb");
+            // One layout per storage key (event id or "default").
+            e.HasIndex(x => x.Name).IsUnique();
             e.HasOne(x => x.RaidEvent)
              .WithMany(r => r.BoardLayouts)
              .HasForeignKey(x => x.RaidEventId)
