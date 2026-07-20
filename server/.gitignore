@@ -1,0 +1,9 @@
+bin/
+obj/
+.vs/
+*.user
+
+# Local-only TLS-inspection root CAs (machine-specific; see ca-certs/README.md).
+# Keep the directory + .gitkeep, ignore the actual certs.
+ca-certs/*.crt
+ca-certs/*.pem
