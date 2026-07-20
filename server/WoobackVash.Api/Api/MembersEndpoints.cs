@@ -195,21 +195,26 @@ public static class MembersEndpoints
             return Results.Json(await q.ToListAsync());
         });
 
+        // Add a character. Officers may attach it to any member (or leave it an
+        // orphan) — that's how they seed the roster and claim unlinked characters.
+        // Everyone else is pinned to their own member: a non-officer can only create
+        // characters for themselves, and a memberId for anyone else is rejected.
         chars.MapPost("", async (HttpContext ctx, SessionTokenService tokens, CharacterInput input) =>
         {
-            var (_, error) = ctx.RequireOfficer(tokens);
+            var (session, error) = ctx.RequireSession(tokens);
             if (error is not null) return error;
             var db = ctx.RequestServices.GetService<AppDbContext>();
             if (db is null) return DbUnavailable();
 
             if (string.IsNullOrWhiteSpace(input.Name))
                 return Results.Json(new { error = "bad_request", detail = "Name is required." }, statusCode: 400);
-            if (input.MemberId is Guid mid && !await db.Members.AnyAsync(m => m.Id == mid))
-                return Results.Json(new { error = "bad_request", detail = "Unknown memberId." }, statusCode: 400);
+
+            var (memberId, mErr) = await ResolveTargetMember(db, session!, input.MemberId);
+            if (mErr is not null) return mErr;
 
             var c = new Character
             {
-                MemberId = input.MemberId,
+                MemberId = memberId,
                 Name = input.Name.Trim(),
                 Class = input.Class,
                 Spec = input.Spec,
@@ -224,24 +229,30 @@ public static class MembersEndpoints
             return Results.Json(new { id = c.Id }, statusCode: 201);
         });
 
+        // Edit a character. Officers may edit any character and reassign it to any
+        // member (or unlink it); everyone else may only edit their own and may not
+        // reassign it away from — or claim it onto — someone else's member.
         chars.MapPut("/{id:guid}", async (HttpContext ctx, SessionTokenService tokens, Guid id, CharacterInput input) =>
         {
-            var (_, error) = ctx.RequireOfficer(tokens);
+            var (session, error) = ctx.RequireSession(tokens);
             if (error is not null) return error;
             var db = ctx.RequestServices.GetService<AppDbContext>();
             if (db is null) return DbUnavailable();
 
             var c = await db.Characters.FirstOrDefaultAsync(x => x.Id == id);
             if (c is null) return Results.NotFound(new { error = "not_found" });
-            if (input.MemberId is Guid mid && !await db.Members.AnyAsync(m => m.Id == mid))
-                return Results.Json(new { error = "bad_request", detail = "Unknown memberId." }, statusCode: 400);
+
+            var accessErr = await AuthorizeCharacterAccess(db, session!, c);
+            if (accessErr is not null) return accessErr;
+            var (memberId, mErr) = await ResolveTargetMember(db, session!, input.MemberId);
+            if (mErr is not null) return mErr;
 
             if (!string.IsNullOrWhiteSpace(input.Name)) c.Name = input.Name.Trim();
             c.Class = input.Class;
             c.Spec = input.Spec;
             c.Realm = input.Realm;
             c.Notes = input.Notes;
-            c.MemberId = input.MemberId;
+            c.MemberId = memberId;
             if (input.IsMain is bool im) c.IsMain = im;
 
             if (c.IsMain && c.MemberId is Guid m2)
@@ -250,19 +261,60 @@ public static class MembersEndpoints
             return Results.Json(new { ok = true });
         });
 
+        // Delete a character. Officers may delete any; everyone else only their own.
         chars.MapDelete("/{id:guid}", async (HttpContext ctx, SessionTokenService tokens, Guid id) =>
         {
-            var (_, error) = ctx.RequireOfficer(tokens);
+            var (session, error) = ctx.RequireSession(tokens);
             if (error is not null) return error;
             var db = ctx.RequestServices.GetService<AppDbContext>();
             if (db is null) return DbUnavailable();
 
             var c = await db.Characters.FirstOrDefaultAsync(x => x.Id == id);
             if (c is null) return Results.NotFound(new { error = "not_found" });
+
+            var accessErr = await AuthorizeCharacterAccess(db, session!, c);
+            if (accessErr is not null) return accessErr;
+
             db.Characters.Remove(c);
             await db.SaveChangesAsync();
             return Results.Json(new { ok = true });
         });
+    }
+
+    // Resolve which member a create/edit should attach a character to, enforcing
+    // the self-only rule for non-officers. Officers may target any existing member
+    // (or null — an orphan); everyone else is pinned to their own member and may
+    // not target someone else's. Returns (memberId, null) or (default, error).
+    private static async Task<(Guid? memberId, IResult? error)> ResolveTargetMember(
+        AppDbContext db, SessionPayload session, Guid? requested)
+    {
+        if (session.Officer)
+        {
+            if (requested is Guid mid && !await db.Members.AnyAsync(m => m.Id == mid))
+                return (null, Results.Json(new { error = "bad_request", detail = "Unknown memberId." }, statusCode: 400));
+            return (requested, null);
+        }
+
+        var self = await db.Members.FirstOrDefaultAsync(m => m.DiscordUserId == session.Uid);
+        if (self is null)
+            return (null, Results.Json(new { error = "no_member", detail = "No member record for your account." }, statusCode: 404));
+        if (requested is Guid rid && rid != self.Id)
+            return (null, Results.Json(new { error = "forbidden", detail = "You can only assign characters to your own member." }, statusCode: 403));
+        return (self.Id, null);
+    }
+
+    // Authorize a write to an existing character. Officers may modify any character;
+    // everyone else only their own. Returns null when allowed, else an error.
+    private static async Task<IResult?> AuthorizeCharacterAccess(
+        AppDbContext db, SessionPayload session, Character c)
+    {
+        if (session.Officer) return null;
+        var self = await db.Members.FirstOrDefaultAsync(m => m.DiscordUserId == session.Uid);
+        if (self is null)
+            return Results.Json(new { error = "no_member", detail = "No member record for your account." }, statusCode: 404);
+        if (c.MemberId != self.Id)
+            return Results.Json(new { error = "forbidden", detail = "You can only manage your own characters." }, statusCode: 403);
+        return null;
     }
 
     // A member has at most one main; setting one demotes the others.
