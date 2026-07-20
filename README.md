@@ -6,7 +6,11 @@ tiers**: a **home** hub open to any member with the home role, and the Lady Vash
 
 - **`index.html`** — public landing page. "Sign in with Discord" only.
 - **`home.html`** — the default page after sign-in: a welcome hub with a hamburger
-  menu (Home / Vash assignments) and app cards. Open to any signed-in tier.
+  menu (Home / Warcraft Logs / Vash assignments) and app cards. Open to any
+  signed-in tier.
+- **`logs.html`** — the **Warcraft Logs** app: the full list of the guild's
+  uploaded reports (newest first), each linked straight to Warcraft Logs. Open to
+  any signed-in tier (logs are public).
 - **`board.html`** — the assignment board. Only reachable with a valid **officer**
   session; `app.js` + `styles.css` power it.
 - **`sheet.html`** — a read-only view of the guild's loot / BIS-priority sheet,
@@ -16,12 +20,15 @@ tiers**: a **home** hub open to any member with the home role, and the Lady Vash
   "anyone with the link" share setting, so the sign-in gate here is for the app's
   flow, not a data barrier.
 - **`menu.js`** — shared session helpers + hamburger menu, used by every page.
-- **`raidhelper-proxy.worker.js`** — Cloudflare Worker doing two jobs:
+- **`raidhelper-proxy.worker.js`** — Cloudflare Worker doing three jobs:
   1. Discord OAuth (`/auth/login`, `/auth/callback`) — verifies the signed-in
      user's guild roles and issues a short-lived HMAC-signed session token whose
      `officer` flag records their tier.
   2. Raid-Helper CORS proxy — every proxied call requires an **officer** session
      token, so roster data is never returned to non-officers.
+  3. Warcraft Logs proxy (`/wcl/reports`) — pulls the guild's report list from the
+     Warcraft Logs v2 API with server-side credentials. Requires any valid session
+     (home tier is enough, since logs are public).
 
 ## How the gate works
 
@@ -69,6 +76,8 @@ valid officer signature.
 npx wrangler secret put RH_TOKEN               # Raid-Helper API token (existing)
 npx wrangler secret put DISCORD_CLIENT_SECRET  # from the Discord app
 npx wrangler secret put SESSION_SECRET         # any long random string
+npx wrangler secret put WCL_CLIENT_ID          # Warcraft Logs v2 API client id
+npx wrangler secret put WCL_CLIENT_SECRET      # Warcraft Logs v2 API client secret
 ```
 (Or Dashboard → the Worker → Settings → Variables and Secrets → Add → Secret.)
 
@@ -84,7 +93,25 @@ npx wrangler secret put SESSION_SECRET         # any long random string
   anyone who has that link. Fine for a BIS/loot guide, but don't put anything you
   wouldn't want outside the guild on a tab of this sheet.
 
-### 5. Deploy
+### 5. Set up the Warcraft Logs app
+The **Warcraft Logs** app (`logs.html`) pulls the guild's report list through the
+Worker's `/wcl/reports` route. The guild identity is already set in
+`raidhelper-proxy.worker.js` — wooback on the **Fresh** (Classic Anniversary) realm
+**Dreamscythe (US)**, so the route targets `fresh.warcraftlogs.com` (a Fresh guild
+is not visible on the retail `www` API). The `WCL_HOST` / `WCL_GUILD_*` constants
+at the top of the file capture this; change them if the guild ever moves.
+
+All that's left is the API credentials:
+1. Create a v2 API client at https://www.warcraftlogs.com/api/clients/ (any name;
+   the redirect URL is unused for the Client Credentials flow).
+2. Copy the **Client ID** and **Client Secret** into the `WCL_CLIENT_ID` and
+   `WCL_CLIENT_SECRET` secrets above.
+
+Until those two secrets are set, the page shows a "not set on the Worker yet"
+message instead of logs. (The OAuth token endpoint stays on `www.warcraftlogs.com`
+— it's shared across all game versions.)
+
+### 6. Deploy
 ```
 npx wrangler deploy
 ```

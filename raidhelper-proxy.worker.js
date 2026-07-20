@@ -40,6 +40,32 @@ const RAID_HELPER    = 'https://raid-helper.xyz/api';
 // Origin allowed to call the proxy with fetch/XHR (the board page). Origin only.
 const ALLOWED_ORIGIN = 'https://cowdunstan.github.io';
 
+/* ─────────────────────── Warcraft Logs (v2 API) ───────────────────────
+ * The logs.html app pulls the guild's report list through here so the API
+ * credentials stay server-side. Unlike the Raid-Helper proxy, this needs only
+ * a valid (home-tier) session — Warcraft Logs reports are public information.
+ *
+ * Credentials come from a Warcraft Logs "v2 API client" (Client Credentials
+ * flow). Create one at https://www.warcraftlogs.com/api/clients/ and set them
+ * as Worker secrets:
+ *     npx wrangler secret put WCL_CLIENT_ID
+ *     npx wrangler secret put WCL_CLIENT_SECRET
+ *
+ * Then fill in the guild's Warcraft Logs identity below. You can read all three
+ * off the guild's page URL: warcraftlogs.com/guild/<region>/<server>/<name>. */
+const WCL_OAUTH = 'https://www.warcraftlogs.com/oauth/token';  // shared across game versions
+// Warcraft Logs partitions data by game version onto separate hosts, each with its
+// own GraphQL endpoint and report URLs (www = Retail, classic, fresh, sod, …). The
+// wooback guild lives on the Fresh (Classic Anniversary) realm Dreamscythe, so we
+// talk to fresh.warcraftlogs.com — a Fresh guild is not visible on the www API.
+const WCL_HOST  = 'https://fresh.warcraftlogs.com';
+const WCL_GQL   = WCL_HOST + '/api/v2/client';
+// The guild's Warcraft Logs identity, read from its page URL
+// (fresh.warcraftlogs.com/guild/<region>/<server>/<name>).
+const WCL_GUILD_NAME   = 'wooback';
+const WCL_GUILD_SERVER = 'dreamscythe';   // realm slug as it appears in the URL
+const WCL_GUILD_REGION = 'US';            // 'US' | 'EU' | ...
+
 const DISCORD_API       = 'https://discord.com/api';
 const DISCORD_CLIENT_ID = '1528486803751829554';
 const GUILD_ID          = '1462481995119722649';
@@ -235,6 +261,99 @@ async function handleCallback(request, url, env) {
   return redirectToApp('/home.html', 'session', session, CLEAR_STATE_COOKIE);
 }
 
+/* ─────────────────── Warcraft Logs reports (gated) ─────────────────── */
+// Best-effort token cache. Workers may reuse an isolate across requests, so a
+// module-level cache saves a token round-trip; it's fine if it doesn't persist.
+let wclTokenCache = { token: null, exp: 0 };
+async function getWclToken(env) {
+  const now = Math.floor(Date.now() / 1000);
+  if (wclTokenCache.token && wclTokenCache.exp - 60 > now) return wclTokenCache.token;
+  if (!env || !env.WCL_CLIENT_ID || !env.WCL_CLIENT_SECRET) return null;
+  let r;
+  try {
+    r = await fetch(WCL_OAUTH, {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Basic ' + btoa(`${env.WCL_CLIENT_ID}:${env.WCL_CLIENT_SECRET}`),
+        'Content-Type': 'application/x-www-form-urlencoded'
+      },
+      body: 'grant_type=client_credentials'
+    });
+  } catch (e) { return null; }
+  if (!r.ok) return null;
+  const j = await r.json();
+  if (!j.access_token) return null;
+  wclTokenCache = { token: j.access_token, exp: now + (j.expires_in || 3600) };
+  return j.access_token;
+}
+
+// Pull every report for the guild (paged, newest first) and return a slim list.
+async function handleWclReports(request, url, env) {
+  if (request.method !== 'GET') {
+    return new Response('Method not allowed', { status: 405, headers: corsHeaders() });
+  }
+  // Any valid session is enough — logs are public, so home-tier members get in.
+  const auth = request.headers.get('Authorization') || '';
+  const m = auth.match(/^Bearer\s+(.+)$/i);
+  const session = m ? await verifySession(m[1], env.SESSION_SECRET) : null;
+  if (!session) {
+    return jsonResponse(401, { error: 'unauthorized', detail: 'Sign-in required.' });
+  }
+
+  if (!WCL_GUILD_SERVER || !WCL_GUILD_REGION) {
+    return jsonResponse(501, { error: 'not_configured', detail: 'Warcraft Logs guild is not set on the Worker yet.' });
+  }
+  const token = await getWclToken(env);
+  if (!token) {
+    return jsonResponse(501, { error: 'not_configured', detail: 'Warcraft Logs API credentials are not set on the Worker yet.' });
+  }
+
+  const query = `query($name:String!,$server:String!,$region:String!,$page:Int!){` +
+    `reportData{reports(guildName:$name,guildServerSlug:$server,guildServerRegion:$region,limit:100,page:$page){` +
+    `has_more_pages data{code title startTime endTime zone{name} owner{name}}}}}`;
+
+  const reports = [];
+  let page = 1;
+  try {
+    // Cap the walk so a huge history can't run us into subrequest limits.
+    while (page <= 15) {
+      const r = await fetch(WCL_GQL, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query, variables: {
+          name: WCL_GUILD_NAME, server: WCL_GUILD_SERVER, region: WCL_GUILD_REGION, page
+        } })
+      });
+      if (!r.ok) return jsonResponse(502, { error: 'upstream', detail: 'Warcraft Logs API returned ' + r.status });
+      const j = await r.json();
+      const node = j && j.data && j.data.reportData && j.data.reportData.reports;
+      if (!node) {
+        const gqlErr = j && j.errors && j.errors[0] && j.errors[0].message;
+        return jsonResponse(502, { error: 'upstream', detail: gqlErr || 'Unexpected Warcraft Logs response.' });
+      }
+      for (const rep of (node.data || [])) {
+        reports.push({
+          code: rep.code,
+          title: rep.title,
+          startTime: rep.startTime,
+          endTime: rep.endTime,
+          zone: (rep.zone && rep.zone.name) || '',
+          owner: (rep.owner && rep.owner.name) || '',
+          url: WCL_HOST + '/reports/' + rep.code
+        });
+      }
+      if (!node.has_more_pages) break;
+      page++;
+    }
+  } catch (err) {
+    return jsonResponse(502, { error: 'upstream fetch failed', detail: String(err) });
+  }
+
+  const guildUrl = `${WCL_HOST}/guild/${WCL_GUILD_REGION.toLowerCase()}/` +
+    `${WCL_GUILD_SERVER}/${encodeURIComponent(WCL_GUILD_NAME)}`;
+  return jsonResponse(200, { guild: WCL_GUILD_NAME, guildUrl, reports });
+}
+
 /* ─────────────────── Raid-Helper proxy (gated) ─────────────────── */
 async function handleProxy(request, url, env) {
   if (request.method !== 'GET') {
@@ -283,6 +402,7 @@ export default {
     const url = new URL(request.url);
     if (url.pathname === '/auth/login')    return handleLogin();
     if (url.pathname === '/auth/callback') return handleCallback(request, url, env);
+    if (url.pathname === '/wcl/reports')   return handleWclReports(request, url, env);
 
     return handleProxy(request, url, env);
   }

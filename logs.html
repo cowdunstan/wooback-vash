@@ -1,0 +1,157 @@
+<meta charset="utf-8">
+<script>
+/* Access gate (home tier). Runs before anything renders: captures a session
+   handed back by the auth Worker (logs.html#session=…), and bounces to the
+   landing page if there is no unexpired session. Warcraft Logs are public, so
+   any signed-in tier may view them — the Worker only issues sessions to
+   home-role or officer holders. */
+(function(){
+  var m = location.hash.match(/(?:^#|&)session=([^&]+)/);
+  if(m){
+    try{ localStorage.setItem('vashj_session', decodeURIComponent(m[1])); }catch(e){}
+    history.replaceState(null, '', location.pathname + location.search);
+  }
+  function valid(tok){
+    if(!tok) return false;
+    try{
+      var p = tok.split('.')[0].replace(/-/g,'+').replace(/_/g,'/');
+      while(p.length % 4) p += '=';
+      var payload = JSON.parse(atob(p));
+      return payload.exp && payload.exp > Math.floor(Date.now()/1000);
+    }catch(e){ return false; }
+  }
+  var tok = null;
+  try{ tok = localStorage.getItem('vashj_session'); }catch(e){}
+  if(!valid(tok)){
+    try{ localStorage.removeItem('vashj_session'); }catch(e){}
+    location.replace('index.html');
+  }
+})();
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+
+<div class="app">
+  <div class="wrap">
+    <div class="topbar">
+      <div class="nav">
+        <button class="hamburger" id="navToggle" aria-label="Menu" aria-expanded="false" aria-controls="navDrawer">
+          <span></span><span></span><span></span>
+        </button>
+        <nav class="nav-drawer" id="navDrawer">
+          <a href="home.html">Home</a>
+          <a href="logs.html" class="active">Warcraft Logs</a>
+          <a href="board.html" data-officer-only>Vash assignments</a>
+        </nav>
+      </div>
+      <span class="topbar-right">
+        <span id="authWho" class="auth-who"></span>
+        <button class="btn-ghost" onclick="logout()">Sign out</button>
+      </span>
+    </div>
+
+    <div class="home-hero">
+      <span class="eyebrow">Guild Tools</span>
+      <h1>Warcraft Logs</h1>
+      <p class="subtitle">Every log the wooback guild has uploaded, newest first. Click any raid to open it on Warcraft Logs.</p>
+    </div>
+
+    <div class="logs-toolbar">
+      <button class="btn-primary" id="refreshBtn" onclick="loadLogs()">Refresh</button>
+      <a class="btn-ghost" id="guildLink" href="#" target="_blank" rel="noopener" style="display:none;">Open guild on Warcraft Logs →</a>
+      <span class="spacer"></span>
+      <span id="logStatus" class="logs-status"></span>
+    </div>
+
+    <div id="logList" class="log-list"></div>
+
+    <footer>wooback guild tools — logs pulled live from Warcraft Logs.</footer>
+  </div>
+</div>
+
+<script src="menu.js"></script>
+<script>
+  // The auth Worker that proxies the Warcraft Logs API (see raidhelper-proxy.worker.js).
+  const WCL_BASE = 'https://wooback-vash.cowdunstan.workers.dev';
+
+  function setStatus(msg, isErr){
+    const el = document.getElementById('logStatus');
+    el.textContent = msg || '';
+    el.style.color = isErr ? 'var(--amber)' : 'var(--text-dim)';
+  }
+
+  function esc(s){
+    return String(s == null ? '' : s)
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+      .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+  }
+
+  // Warcraft Logs start/end times are epoch milliseconds.
+  function fmtDate(ms){
+    if(!ms) return '';
+    try{
+      return new Date(ms).toLocaleDateString(undefined,
+        { weekday:'short', year:'numeric', month:'short', day:'numeric' });
+    }catch(e){ return ''; }
+  }
+
+  function render(data){
+    const list = document.getElementById('logList');
+    const link = document.getElementById('guildLink');
+    if(data.guildUrl){
+      link.href = data.guildUrl;
+      link.style.display = '';
+    }
+    const reports = data.reports || [];
+    if(!reports.length){
+      list.innerHTML = '<div class="log-empty">No logs found for this guild yet.</div>';
+      return;
+    }
+    list.innerHTML = reports.map(function(r){
+      const title = esc(r.title) || 'Untitled log';
+      const zone  = r.zone ? '<span class="log-zone">' + esc(r.zone) + '</span>' : '';
+      const owner = r.owner ? '<span class="log-owner">uploaded by ' + esc(r.owner) + '</span>' : '';
+      return '<a class="log-item" href="' + esc(r.url) + '" target="_blank" rel="noopener">' +
+               '<div class="log-item-main">' +
+                 '<span class="log-title">' + title + '</span>' + zone +
+               '</div>' +
+               '<div class="log-item-meta">' +
+                 '<span class="log-date">' + esc(fmtDate(r.startTime)) + '</span>' + owner +
+                 '<span class="log-go">Open →</span>' +
+               '</div>' +
+             '</a>';
+    }).join('');
+    setStatus(reports.length + (reports.length === 1 ? ' log' : ' logs'));
+  }
+
+  async function loadLogs(){
+    const btn = document.getElementById('refreshBtn');
+    const list = document.getElementById('logList');
+    btn.disabled = true;
+    setStatus('Loading…');
+    list.innerHTML = '<div class="log-empty">Loading logs…</div>';
+    try{
+      const res = await fetch(WCL_BASE + '/wcl/reports', {
+        headers: { 'Authorization': 'Bearer ' + sessionToken() }
+      });
+      let data = {};
+      try{ data = await res.json(); }catch(e){}
+      if(!res.ok){
+        const detail = (data && data.detail) || ('Request failed (' + res.status + ').');
+        list.innerHTML = '<div class="log-empty">' + esc(detail) + '</div>';
+        setStatus(detail, true);
+        return;
+      }
+      render(data);
+    }catch(err){
+      const msg = 'Could not reach the log service.';
+      list.innerHTML = '<div class="log-empty">' + esc(msg) + '</div>';
+      setStatus(msg, true);
+    }finally{
+      btn.disabled = false;
+    }
+  }
+
+  loadLogs();
+</script>
