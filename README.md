@@ -1,122 +1,137 @@
 # wooback-raid-tools
 
 Guild tools for the wooback Discord server, gated behind Discord access in **two
-tiers**: a **home** hub open to any member with the home role, and the Lady Vashj
-(Phase 2) raid-assignment **board** reserved for **officers**.
+tiers**: a **home** hub open to any member with the home role, and the officer
+tools (the Lady Vashj assignment **board** and the **loot & attendance** log)
+reserved for **officers**.
+
+The site is a static frontend on **GitHub Pages** (`wooback.info`) talking to a
+**.NET 8 backend** (`server/`) hosted on **Fly.io** with **Postgres**. The backend
+handles Discord OAuth, proxies Raid-Helper and Warcraft Logs, and persists the
+board, identity links, loot, and attendance.
+
+> The backend replaced an earlier Cloudflare Worker. See `server/` for the API and
+> `dotnet-migration-plan.md` for the migration history.
+
+## Frontend (GitHub Pages)
 
 - **`index.html`** — public landing page. "Sign in with Discord" only.
 - **`home.html`** — the default page after sign-in: a welcome hub with a hamburger
-  menu (Home / Warcraft Logs / Vash assignments) and app cards. Open to any
-  signed-in tier.
-- **`logs.html`** — the **Warcraft Logs** app: the full list of the guild's
-  uploaded reports (newest first), each linked straight to Warcraft Logs. Open to
-  any signed-in tier (logs are public).
-- **`board.html`** — the assignment board. Only reachable with a valid **officer**
-  session; `app.js` + `styles.css` power it.
-- **`sheet.html`** — a read-only view of the guild's loot / BIS-priority sheet,
-  open to **any signed-in tier**; it embeds the sheet's `/preview` URL in an
-  `<iframe>` (see `SHEET_EMBED_URL` in the file), so Google's own formatting,
-  colors, merged banners, and tabs are preserved. It reads the live sheet via its
+  menu and app cards. Open to any signed-in tier.
+- **`logs.html`** — the **Warcraft Logs** app: the guild's uploaded reports
+  (newest first), each linked straight to Warcraft Logs. Any signed-in tier.
+- **`board.html`** — the Lady Vashj assignment board (**officers only**); `app.js`
+  + `styles.css` power it. Imports rosters from Raid-Helper, and **saves/loads**
+  the whole board (roster + slot counts + assignments) to the backend per raid.
+- **`loot.html`** — **loot & attendance** log (**officers only**): per-raid loot
+  awards and attendance, saved to the guild database.
+- **`sheet.html`** — a read-only `<iframe>` of the guild's loot / BIS sheet
+  (`SHEET_EMBED_URL`), open to any signed-in tier. Reads the live sheet via its
   "anyone with the link" share setting, so the sign-in gate here is for the app's
   flow, not a data barrier.
 - **`menu.js`** — shared session helpers + hamburger menu, used by every page.
-- **`raidhelper-proxy.worker.js`** — Cloudflare Worker doing three jobs:
-  1. Discord OAuth (`/auth/login`, `/auth/callback`) — verifies the signed-in
-     user's guild roles and issues a short-lived HMAC-signed session token whose
-     `officer` flag records their tier.
-  2. Raid-Helper CORS proxy — every proxied call requires an **officer** session
-     token, so roster data is never returned to non-officers.
-  3. Warcraft Logs proxy (`/wcl/reports`) — pulls the guild's report list from the
-     Warcraft Logs v2 API with server-side credentials. Requires any valid session
-     (home tier is enough, since logs are public).
+
+Each page points at the backend through a single constant: `AUTH_BASE`
+(`index.html`), `RH_PROXY` + `API_BASE` (`app.js`), `WCL_BASE` (`logs.html`),
+`API_BASE` (`loot.html`) — all `https://wooback-vash-api.fly.dev`.
+
+## Backend (`server/WoobackVash.Api`)
+
+A .NET 8 Minimal-API app (EF Core + Npgsql). Routes:
+
+- **Discord OAuth** — `/auth/login`, `/auth/callback`. Reads the signed-in user's
+  guild roles and issues a short-lived HMAC-signed session token whose `officer`
+  flag records their tier. The token format is `base64url(payload).base64url(HMAC)`
+  with payload `{ uid, name, officer, exp }`; pages decode it client-side.
+- **Raid-Helper proxy** — `GET /v4/*`, officer-gated. The Raid-Helper token is
+  attached server-side (`RaidHelper__Token`) and never reaches the browser.
+- **Warcraft Logs proxy** — `GET /wcl/reports`, any valid session (logs are
+  public). Server-side v2 API credentials, a cached report list (officers can
+  force a refresh), and an officer-only `/wcl/ratelimit` budget check.
+- **Persistence** (officer-gated) — `/api/board` (save/load the board snapshot as
+  jsonb), `/api/members` + `/api/characters` (Discord↔main↔alts identity links),
+  `/api/loot` and `/api/attendance` (per-raid history).
+- **Health** — `/healthz` (liveness), `/readyz` (DB reachability + error detail).
+
+Non-secret config (Discord client id, guild id, role ids, WCL guild identity)
+lives in `server/WoobackVash.Api/appsettings.json`.
 
 ## How the gate works
 
-1. Landing page sends the user to `<worker>/auth/login`.
-2. The Worker redirects to Discord (`identify guilds.members.read` scope — no bot
-   needed), then Discord calls back to `<worker>/auth/callback`.
-3. The Worker reads the user's roles in the guild via
-   `/users/@me/guilds/{guild}/member`:
+1. Landing page sends the user to `<API_BASE>/auth/login`.
+2. The backend redirects to Discord (`identify guilds.members.read` scope — no bot
+   needed), then Discord calls back to `<API_BASE>/auth/callback`.
+3. The backend reads the user's roles via `/users/@me/guilds/{guild}/member`:
    - holds an `OFFICER_ROLE_IDS` role → officer session (`officer: true`);
    - holds `HOME_ROLE_ID` (or is an officer) → home session (`officer: false`);
    - neither → redirected back to the landing page with a "no access" message.
-   On success it mints a signed session and redirects to `home.html#session=…`.
-4. The pages store the session; `board.html` attaches it to every Raid-Helper
-   request. The Worker rejects Raid-Helper calls with no session (`401`) or a
-   non-officer session (`403`).
+   On success it upserts the member, mints a signed session, and redirects to
+   `home.html#session=…`.
+4. Pages store the session and send it as `Authorization: Bearer <token>`. The
+   backend rejects officer routes with no session (`401`) or a non-officer session
+   (`403`). Client-side checks only decide what to *show*; the real enforcement is
+   the backend refusing data without a valid signature.
 
-The client-side checks (home requires a valid session; the board additionally
-requires the `officer` flag and hides the Vash menu item / card otherwise) only
-decide what to *show*; the real enforcement is the Worker refusing data without a
-valid officer signature.
+## Setup
 
-## One-time setup
+### 1. Discord application
+- https://discord.com/developers/applications → your app.
+- **OAuth2 → Redirects** → add exactly:
+  `https://wooback-vash-api.fly.dev/auth/callback`
+- **OAuth2** → copy the **Client Secret** (set as a backend secret below).
+- The **Application ID**, `GUILD_ID`, `OFFICER_ROLE_IDS`, and `HOME_ROLE_ID` are
+  already in `appsettings.json`.
 
-### 1. Create the Discord application
-- https://discord.com/developers/applications → **New Application**.
-- **General Information** → copy the **Application ID** → put it in
-  `raidhelper-proxy.worker.js` as `DISCORD_CLIENT_ID`.
-- **OAuth2** → **Redirects** → add exactly:
-  `https://wooback-vash.cowdunstan.workers.dev/auth/callback`
-  (must match `WORKER_BASE` + `/auth/callback`).
-- **OAuth2** → copy the **Client Secret** (used as a Worker secret below).
-
-### 2. Verify the config constants in `raidhelper-proxy.worker.js`
-- `DISCORD_CLIENT_ID` — from step 1.
-- `GUILD_ID` — `1462481995119722649` (same as the Raid-Helper server ID).
-- `OFFICER_ROLE_IDS` — the three officer role IDs (already filled in).
-- `HOME_ROLE_ID` — the broader role that unlocks the home page (already filled in).
-- `WORKER_BASE` — this Worker's public URL.
-- `APP_BASE` — where GitHub Pages serves the site (currently
-  `https://cowdunstan.github.io/wooback-raid-tools`). **Confirm this matches your Pages
-  URL** — a project page lives under `/<repo>/`.
-
-### 3. Set the Worker secrets (never commit these)
+### 2. Deploy the backend to Fly.io
+From `server/`:
 ```
-npx wrangler secret put RH_TOKEN               # Raid-Helper API token (existing)
-npx wrangler secret put DISCORD_CLIENT_SECRET  # from the Discord app
-npx wrangler secret put SESSION_SECRET         # any long random string
-npx wrangler secret put WCL_CLIENT_ID          # Warcraft Logs v2 API client id
-npx wrangler secret put WCL_CLIENT_SECRET      # Warcraft Logs v2 API client secret
+fly launch --no-deploy            # first time; creates the app from fly.toml
+fly postgres create               # a Postgres cluster
+fly postgres attach <pg-app> -a wooback-vash-api    # sets DATABASE_URL
+fly deploy
 ```
-(Or Dashboard → the Worker → Settings → Variables and Secrets → Add → Secret.)
+The app applies EF Core migrations on startup, so the schema is created on first
+boot against a reachable database.
 
-### 4. Connect the loot sheet
-- No "Publish to web" needed. `SHEET_EMBED_URL` in `sheet.html` is just the
-  sheet's own link with `/edit?usp=sharing` replaced by `/preview`. To point it
-  at a different sheet, swap the id.
-- The sheet's **General access must be "Anyone with the link → Viewer"** so
-  members see it without a Google login. (If you set it to specific accounts
-  instead, the frame still works but each viewer must be signed into an
-  authorized Google account.)
-- Note: "anyone with the link" means the sheet's *contents* are reachable by
-  anyone who has that link. Fine for a BIS/loot guide, but don't put anything you
-  wouldn't want outside the guild on a tab of this sheet.
-
-### 5. Set up the Warcraft Logs app
-The **Warcraft Logs** app (`logs.html`) pulls the guild's report list through the
-Worker's `/wcl/reports` route. The guild identity is already set in
-`raidhelper-proxy.worker.js` — wooback on the **Fresh** (Classic Anniversary) realm
-**Dreamscythe (US)**, so the route targets `fresh.warcraftlogs.com` (a Fresh guild
-is not visible on the retail `www` API). The `WCL_HOST` / `WCL_GUILD_*` constants
-at the top of the file capture this; change them if the guild ever moves.
-
-All that's left is the API credentials:
-1. Create a v2 API client at https://www.warcraftlogs.com/api/clients/ (any name;
-   the redirect URL is unused for the Client Credentials flow).
-2. Copy the **Client ID** and **Client Secret** into the `WCL_CLIENT_ID` and
-   `WCL_CLIENT_SECRET` secrets above.
-
-Until those two secrets are set, the page shows a "not set on the Worker yet"
-message instead of logs. (The OAuth token endpoint stays on `www.warcraftlogs.com`
-— it's shared across all game versions.)
-
-### 6. Deploy
+### 3. Backend secrets
+.NET binds nested config with **double underscores** — use these exact names
+(not the flat `DISCORD_CLIENT_SECRET` style):
 ```
-npx wrangler deploy
+fly secrets set -a wooback-vash-api `
+  "Discord__ClientSecret=<discord client secret>" `
+  "Session__Secret=<any long random string>" `
+  "RaidHelper__Token=<raid-helper API token>" `
+  "WarcraftLogs__ClientId=<wcl v2 client id>" `
+  "WarcraftLogs__ClientSecret=<wcl v2 client secret>"
 ```
+`DATABASE_URL` is set by `fly postgres attach`. Setting secrets restarts the app.
+Verify with `curl https://wooback-vash-api.fly.dev/readyz` → `{"db":"ok"}`.
 
-## Local note
-`ALLOWED_ORIGIN` in the Worker locks the Raid-Helper proxy to the GitHub Pages
-origin, so the board's API calls only work from the deployed site (not from a
-`localhost` preview).
+### 4. Warcraft Logs credentials
+Create a v2 API client at https://www.warcraftlogs.com/api/clients/ (any name; the
+redirect URL is unused for the Client Credentials flow) and set its id/secret as
+the `WarcraftLogs__*` secrets above. The guild identity — wooback on the **Fresh**
+(Classic Anniversary) realm **Dreamscythe (US)**, so the route targets
+`fresh.warcraftlogs.com` — is in `appsettings.json` (`WarcraftLogs` section); a
+Fresh guild is not visible on the retail `www` API. The OAuth token endpoint stays
+on `www.warcraftlogs.com` (shared across game versions).
+
+### 5. Loot sheet
+- No "Publish to web" needed. `SHEET_EMBED_URL` in `sheet.html` is the sheet's own
+  link with `/edit?usp=sharing` replaced by `/preview`. Swap the id to point it at
+  a different sheet.
+- The sheet's **General access must be "Anyone with the link → Viewer"** so members
+  see it without a Google login. Anyone with the link can read its contents, so
+  don't put anything guild-private on a tab of this sheet.
+
+### 6. CORS / origins
+The backend's allowed browser origins (`wooback.info`, `www.wooback.info`,
+`cowdunstan.github.io`) are in `appsettings.json` (`AllowedOrigins`). The board's
+API calls only work from those origins, not a bare `localhost` preview.
+
+## Local development
+The backend needs a local Postgres and secrets via user-secrets. See
+`server/WoobackVash.Api` — `dotnet run` with a `ConnectionStrings:Default` and
+`dotnet user-secrets set "Discord:ClientSecret" …`. Docker builds behind a
+TLS-inspecting proxy/AV need the extra root CA in `server/ca-certs/`
+(see `server/ca-certs/README.md`).

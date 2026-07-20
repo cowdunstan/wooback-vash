@@ -1,9 +1,0 @@
-# Config for deploying the Raid-Helper proxy + Discord officer gate with Wrangler:
-#   npx wrangler deploy
-# (first run opens a browser to log in to Cloudflare)
-#
-# Before it works you must set the Worker secrets and fill in the Discord config
-# constants — see README.md ("One-time setup").
-name = "wooback-vash"
-main = "raidhelper-proxy.worker.js"
-compatibility_date = "2026-07-19"
