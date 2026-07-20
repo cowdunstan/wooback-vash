@@ -90,7 +90,7 @@ app.MapGet("/readyz", async (IServiceProvider sp) =>
     }
 });
 
-app.MapGet("/", () => Results.Ok(new { service = "wooback-vash-api", phase = 3 }));
+app.MapGet("/", () => Results.Ok(new { service = "wooback-vash-api", phase = 4 }));
 
 // Discord OAuth login/callback (Phase 1).
 app.MapAuthEndpoints();
@@ -101,6 +101,9 @@ app.MapProxyEndpoints();
 // Persistence: Vash board save/load + identity links (Phase 3).
 app.MapBoardEndpoints();
 app.MapMembersEndpoints();
+
+// Loot + attendance history (Phase 4).
+app.MapRaidLogEndpoints();
 
 app.Run();
 

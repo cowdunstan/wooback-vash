@@ -1,0 +1,225 @@
+<meta charset="utf-8">
+<script>
+/* Officer gate — same as board.html. Loot & attendance are officer tools; the
+   .NET API enforces it on every call, this just decides whether to show the page. */
+(function(){
+  var m = location.hash.match(/(?:^#|&)session=([^&]+)/);
+  if(m){
+    try{ localStorage.setItem('vashj_session', decodeURIComponent(m[1])); }catch(e){}
+    history.replaceState(null, '', location.pathname + location.search);
+  }
+  function payload(tok){
+    if(!tok) return null;
+    try{
+      var p = tok.split('.')[0].replace(/-/g,'+').replace(/_/g,'/');
+      while(p.length % 4) p += '=';
+      return JSON.parse(atob(p));
+    }catch(e){ return null; }
+  }
+  var tok = null;
+  try{ tok = localStorage.getItem('vashj_session'); }catch(e){}
+  var pl = payload(tok);
+  if(!pl || !pl.exp || pl.exp <= Math.floor(Date.now()/1000)){
+    try{ localStorage.removeItem('vashj_session'); }catch(e){}
+    location.replace('index.html');
+  } else if(!pl.officer){
+    location.replace('home.html');
+  }
+})();
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+<style>
+  .rl-toolbar{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;margin-bottom:8px}
+  .rl-grid{display:grid;grid-template-columns:1fr 1fr;gap:22px;margin-top:14px}
+  @media (max-width:820px){ .rl-grid{grid-template-columns:1fr} }
+  .rl-card{background:var(--panel,#0d1a17);border:1px solid var(--panel-line,#1e332d);border-radius:10px;padding:16px}
+  .rl-card h2{font-family:'Cinzel',serif;font-size:16px;margin:0 0 12px}
+  .rl-form{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px}
+  .rl-form input,.rl-form select{background:#0a1815;border:1px solid var(--panel-line,#1e332d);color:var(--text,#dfeee9);border-radius:6px;padding:7px 9px;font-size:13px;font-family:'Inter'}
+  .rl-form input.name{min-width:120px}.rl-form input.item{min-width:150px;flex:1}.rl-form input.note{min-width:110px;flex:1}
+  table.rl{width:100%;border-collapse:collapse;font-size:13px}
+  table.rl th{text-align:left;color:var(--text-dim,#7f9a92);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.6px;padding:6px 8px;border-bottom:1px solid var(--panel-line,#1e332d)}
+  table.rl td{padding:7px 8px;border-bottom:1px solid rgba(30,51,45,.5)}
+  table.rl .muted{color:var(--text-dim,#7f9a92)}
+  .rl-empty{color:var(--text-dim,#7f9a92);padding:10px 8px;font-size:13px}
+  .rl-del{background:none;border:none;color:var(--amber,#e0a53d);cursor:pointer;font-size:13px;padding:2px 6px}
+  .status-pill{display:inline-block;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600}
+  .st-present{background:rgba(46,230,171,.16);color:#2ee6ab}.st-late{background:rgba(224,165,61,.18);color:#e0a53d}
+  .st-bench{background:rgba(127,176,242,.16);color:#7fb0f2}.st-absent{background:rgba(230,90,90,.16);color:#e65a5a}
+</style>
+
+<div class="app">
+  <div class="wrap">
+    <div class="authbar">
+      <span class="authbar-left">
+        <div class="nav">
+          <button class="hamburger" id="navToggle" aria-label="Menu" aria-expanded="false" aria-controls="navDrawer">
+            <span></span><span></span><span></span>
+          </button>
+          <nav class="nav-drawer" id="navDrawer">
+            <a href="home.html">Home</a>
+            <a href="logs.html">Warcraft Logs</a>
+            <a href="board.html" data-officer-only>Vash assignments</a>
+            <a href="loot.html" class="active" data-officer-only>Loot &amp; attendance</a>
+            <a href="sheet.html">Loot sheet</a>
+          </nav>
+        </div>
+        <span class="eyebrow">Raid record</span>
+      </span>
+      <span class="authbar-right">
+        <span id="authWho" class="auth-who"></span>
+        <button class="btn-ghost" onclick="logout()">Sign out</button>
+      </span>
+    </div>
+
+    <h1>Loot &amp; Attendance</h1>
+    <p class="subtitle">Per-raid loot log and attendance. Pick a raid (a Raid-Helper event id, or the default board), then record awards and who showed.</p>
+
+    <div class="rl-toolbar">
+      <div class="field">
+        <label>Raid / event key</label>
+        <input list="rlEvents" type="text" id="eventKey" value="default" style="min-width:260px;">
+        <datalist id="rlEvents"></datalist>
+      </div>
+      <button class="btn-primary" onclick="loadAll()">Load</button>
+      <span id="rlStatus" style="font-size:11.5px;color:var(--text-dim);min-height:15px;"></span>
+    </div>
+
+    <div class="rl-grid">
+      <div class="rl-card">
+        <h2>Attendance</h2>
+        <div class="rl-form">
+          <input class="name" id="attName" placeholder="Character">
+          <select id="attStatus">
+            <option value="present">Present</option>
+            <option value="late">Late</option>
+            <option value="bench">Bench</option>
+            <option value="absent">Absent</option>
+          </select>
+          <input class="note" id="attNote" placeholder="Note (optional)">
+          <button class="btn-ghost" onclick="addAttendance()">Mark</button>
+        </div>
+        <table class="rl"><thead><tr><th>Character</th><th>Status</th><th>Note</th></tr></thead>
+          <tbody id="attBody"><tr><td colspan="3" class="rl-empty">Nothing loaded.</td></tr></tbody>
+        </table>
+      </div>
+
+      <div class="rl-card">
+        <h2>Loot log</h2>
+        <div class="rl-form">
+          <input class="name" id="lootName" placeholder="Character">
+          <input class="item" id="lootItem" placeholder="Item">
+          <input class="note" id="lootNote" placeholder="Note (optional)">
+          <button class="btn-ghost" onclick="addLoot()">Add</button>
+        </div>
+        <table class="rl"><thead><tr><th>Item</th><th>Character</th><th>When</th><th></th></tr></thead>
+          <tbody id="lootBody"><tr><td colspan="4" class="rl-empty">Nothing loaded.</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <footer>wooback guild tools — loot &amp; attendance are saved to the guild database.</footer>
+  </div>
+</div>
+
+<script src="menu.js"></script>
+<script>
+// The .NET persistence API (same host as the board's saves).
+const API_BASE = 'https://wooback-vash-api.fly.dev';
+function authHeaders(extra){ return Object.assign({ 'Authorization': 'Bearer ' + sessionToken() }, extra || {}); }
+function esc(s){ return String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function evKey(){ const v = document.getElementById('eventKey').value.trim(); return v || 'default'; }
+function setStatus(msg, isErr){ const el = document.getElementById('rlStatus'); el.textContent = msg || ''; el.style.color = isErr ? 'var(--amber)' : 'var(--text-dim)'; }
+
+// A fetch wrapper that maps the shared auth failures to friendly UX.
+async function api(path, opts){
+  const res = await fetch(API_BASE + path, Object.assign({ headers: authHeaders(opts && opts.body ? {'Content-Type':'application/json'} : null) }, opts));
+  if(res.status === 401){ setStatus('Session expired — signing out…', true); setTimeout(logout, 1200); throw new Error('401'); }
+  if(res.status === 403){ setStatus('Officer access required.', true); throw new Error('403'); }
+  return res;
+}
+
+function fmtWhen(iso){ try{ const d = new Date(iso); return isNaN(d) ? '' : d.toLocaleDateString(undefined,{month:'short',day:'numeric'}) + ' ' + d.toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'}); }catch(e){ return ''; } }
+
+function renderAttendance(rows){
+  const b = document.getElementById('attBody');
+  if(!rows.length){ b.innerHTML = '<tr><td colspan="3" class="rl-empty">No attendance recorded yet.</td></tr>'; return; }
+  b.innerHTML = rows.map(r=>{
+    const s = String(r.status||'').toLowerCase();
+    return '<tr><td>'+esc(r.character)+'</td>'+
+      '<td><span class="status-pill st-'+esc(s)+'">'+esc(r.status)+'</span></td>'+
+      '<td class="muted">'+esc(r.note)+'</td></tr>';
+  }).join('');
+}
+function renderLoot(rows){
+  const b = document.getElementById('lootBody');
+  if(!rows.length){ b.innerHTML = '<tr><td colspan="4" class="rl-empty">No loot recorded yet.</td></tr>'; return; }
+  b.innerHTML = rows.map(r=>
+    '<tr><td>'+esc(r.itemName)+(r.note?' <span class="muted">— '+esc(r.note)+'</span>':'')+'</td>'+
+    '<td>'+esc(r.character)+'</td>'+
+    '<td class="muted">'+esc(fmtWhen(r.awardedAt))+'</td>'+
+    '<td style="text-align:right;"><button class="rl-del" title="Delete" onclick="delLoot(\''+r.id+'\')">✕</button></td></tr>'
+  ).join('');
+}
+
+async function loadAll(){
+  setStatus('Loading…');
+  try{
+    const [aRes, lRes] = await Promise.all([
+      api('/api/attendance?event=' + encodeURIComponent(evKey())),
+      api('/api/loot?event=' + encodeURIComponent(evKey()))
+    ]);
+    renderAttendance(await aRes.json());
+    renderLoot(await lRes.json());
+    setStatus('Loaded ' + evKey() + '.');
+  }catch(err){ if(!['401','403'].includes(err.message)) setStatus('Could not reach the guild database.', true); }
+}
+
+async function addAttendance(){
+  const character = document.getElementById('attName').value.trim();
+  if(!character){ setStatus('Enter a character name.', true); return; }
+  const body = { event: evKey(), character, status: document.getElementById('attStatus').value, note: document.getElementById('attNote').value.trim() || null };
+  try{
+    const res = await api('/api/attendance', { method:'POST', body: JSON.stringify(body) });
+    if(!res.ok){ setStatus('Save failed (HTTP ' + res.status + ').', true); return; }
+    document.getElementById('attName').value = ''; document.getElementById('attNote').value = '';
+    loadAll();
+  }catch(err){ if(!['401','403'].includes(err.message)) setStatus('Could not reach the guild database.', true); }
+}
+
+async function addLoot(){
+  const character = document.getElementById('lootName').value.trim();
+  const itemName = document.getElementById('lootItem').value.trim();
+  if(!character || !itemName){ setStatus('Enter a character and an item.', true); return; }
+  const body = { event: evKey(), character, itemName, note: document.getElementById('lootNote').value.trim() || null };
+  try{
+    const res = await api('/api/loot', { method:'POST', body: JSON.stringify(body) });
+    if(!res.ok){ setStatus('Save failed (HTTP ' + res.status + ').', true); return; }
+    document.getElementById('lootName').value = ''; document.getElementById('lootItem').value = ''; document.getElementById('lootNote').value = '';
+    loadAll();
+  }catch(err){ if(!['401','403'].includes(err.message)) setStatus('Could not reach the guild database.', true); }
+}
+
+async function delLoot(id){
+  try{
+    const res = await api('/api/loot/' + encodeURIComponent(id), { method:'DELETE' });
+    if(!res.ok){ setStatus('Delete failed (HTTP ' + res.status + ').', true); return; }
+    loadAll();
+  }catch(err){ if(!['401','403'].includes(err.message)) setStatus('Could not reach the guild database.', true); }
+}
+
+// Populate the event datalist with saved board keys for quick picking.
+async function loadEventOptions(){
+  try{
+    const res = await api('/api/board/list');
+    if(!res.ok) return;
+    const list = await res.json();
+    document.getElementById('rlEvents').innerHTML = list.map(x=>'<option value="'+esc(x.key)+'">').join('');
+  }catch(e){ /* non-fatal */ }
+}
+
+loadEventOptions();
+loadAll();
+</script>
