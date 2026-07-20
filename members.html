@@ -60,7 +60,8 @@
   .pill-main{background:rgba(46,230,171,.16);color:#2ee6ab}
   .pill-alt{background:rgba(127,176,242,.14);color:#7fb0f2}
   .mem-add{padding:10px 16px;border-top:1px solid rgba(30,51,45,.5)}
-  .cls{color:var(--text-dim,#7f9a92)}
+  table.rl td strong{font-weight:600}
+  .cls{color:#aecabf}
 </style>
 
 <div class="app">
@@ -117,6 +118,24 @@
 const API_BASE = 'https://wooback-vash-api.fly.dev';
 function authHeaders(extra){ return Object.assign({ 'Authorization': 'Bearer ' + sessionToken() }, extra || {}); }
 function esc(s){ return String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+// WoW class colours (Blizzard palette, a couple brightened for contrast on the
+// dark panel). Class is stored as its WCL subType, e.g. "Warrior"/"DeathKnight".
+const CLASS_COLORS = {
+  warrior:'#c79c6e', paladin:'#f58cba', hunter:'#abd473', rogue:'#fff569',
+  priest:'#ffffff', deathknight:'#e0475f', shaman:'#3b8de0', mage:'#69ccf0',
+  warlock:'#a99ce0', monk:'#00ff96', druid:'#ff7d0a', demonhunter:'#a330c9',
+  evoker:'#33937f'
+};
+function classColor(cls){
+  if(!cls) return null;
+  return CLASS_COLORS[String(cls).toLowerCase().replace(/[^a-z]/g,'')] || null;
+}
+// A character name, coloured by class so it's legible and identifiable at a glance.
+function charName(name, cls){
+  const c = classColor(cls);
+  return '<strong' + (c ? ' style="color:' + c + '"' : '') + '>' + esc(name) + '</strong>';
+}
 function setStatus(msg, isErr){ const el = document.getElementById('rlStatus'); el.textContent = msg || ''; el.style.color = isErr ? 'var(--amber)' : 'var(--text-dim)'; }
 
 // A fetch wrapper that maps the shared auth failures to friendly UX.
@@ -168,7 +187,7 @@ function renderMembers(members){
           : '<button class="lnk" onclick="setMain(\'' + c.id + '\')">Make main</button>';
         const reassign = memberSelect(m.id, 'reassign(\'' + c.id + '\', this.value)');
         return '<tr>' +
-          '<td><strong>' + esc(c.name) + '</strong>' + (c.isMain ? '' : ' <span class="pill pill-alt">Alt</span>') + '</td>' +
+          '<td>' + charName(c.name, c.cls) + (c.isMain ? '' : ' <span class="pill pill-alt">Alt</span>') + '</td>' +
           '<td>' + clsSpec(c) + '</td>' +
           '<td class="muted">' + (c.realm ? esc(c.realm) : '—') + '</td>' +
           '<td>' + badge + '</td>' +
@@ -204,7 +223,7 @@ function renderOrphans(rows){
   if(!rows.length){ b.innerHTML = '<tr><td colspan="4" class="rl-empty">No unlinked characters — every character is attached to a member.</td></tr>'; return; }
   b.innerHTML = rows.map(c =>
     '<tr>' +
-      '<td><strong>' + esc(c.name) + '</strong></td>' +
+      '<td>' + charName(c.name, c.cls) + '</td>' +
       '<td>' + clsSpec(c) + '</td>' +
       '<td class="muted">' + (c.realm ? esc(c.realm) : '—') + '</td>' +
       '<td>' + memberSelect('', 'reassign(\'' + c.id + '\', this.value)') + '</td>' +
