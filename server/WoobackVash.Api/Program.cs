@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.FileProviders;
 using Npgsql;
 using WoobackVash.Api.Api;
 using WoobackVash.Api.Auth;
@@ -49,6 +50,19 @@ var app = builder.Build();
 
 app.UseCors();
 
+// ── Static frontend (local dev only) ───────────────────────────────────────
+// In Development, serve the static site (the repo root, two levels up from this
+// project) from the API's own origin, so the whole app runs on
+// http://localhost:8080 with no separate file server and no cross-origin calls.
+// Production serves the frontend from GitHub Pages, so this block never runs there.
+if (app.Environment.IsDevelopment())
+{
+    var siteRoot = Path.GetFullPath(Path.Combine(app.Environment.ContentRootPath, "..", ".."));
+    var siteFiles = new PhysicalFileProvider(siteRoot);
+    app.UseDefaultFiles(new DefaultFilesOptions { FileProvider = siteFiles });
+    app.UseStaticFiles(new StaticFileOptions { FileProvider = siteFiles });
+}
+
 // ── Startup migration (guarded) ────────────────────────────────────────────
 // Applies EF Core migrations when a database is configured. Wrapped so the API
 // still boots for /healthz before Postgres is provisioned (Phase 0) and before
@@ -93,7 +107,10 @@ app.MapGet("/readyz", async (IServiceProvider sp) =>
     }
 });
 
-app.MapGet("/", () => Results.Ok(new { service = "wooback-vash-api", phase = 4 }));
+// In Development the root is the static index.html (served above); outside it,
+// expose a small service-info payload at "/".
+if (!app.Environment.IsDevelopment())
+    app.MapGet("/", () => Results.Ok(new { service = "wooback-vash-api", phase = 4 }));
 
 // Discord OAuth login/callback (Phase 1).
 app.MapAuthEndpoints();
