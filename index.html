@@ -23,7 +23,9 @@
 
 <script>
   // The .NET backend that handles Discord OAuth (server/WoobackVash.Api).
-  const AUTH_BASE = 'https://wooback-vash-api.fly.dev';
+  const AUTH_BASE = (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
+    ? 'http://localhost:8080'
+    : 'https://wooback-vash-api.fly.dev';
 
   document.getElementById('signin').addEventListener('click', function(){
     location.href = AUTH_BASE + '/auth/login';

@@ -104,7 +104,9 @@
 <script src="menu.js"></script>
 <script>
 // The .NET persistence API (same host as the board's saves).
-const API_BASE = 'https://wooback-vash-api.fly.dev';
+const API_BASE = (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
+  ? 'http://localhost:8080'
+  : 'https://wooback-vash-api.fly.dev';
 function authHeaders(extra){ return Object.assign({ 'Authorization': 'Bearer ' + sessionToken() }, extra || {}); }
 function esc(s){ return String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 function evKey(){ const v = document.getElementById('eventKey').value.trim(); return v || 'default'; }
