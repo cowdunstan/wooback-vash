@@ -71,6 +71,7 @@
   .cs-extra{font-size:11.5px;color:var(--text-dim);margin-top:1px}
   .cs-extra a{color:inherit}
   .cs-noench{color:var(--amber)}
+  .cs-swap{font-style:italic;opacity:.85}
 
   .cs-picker{margin-left:auto;font-size:12px}
   .cs-picker select{
@@ -159,8 +160,8 @@
 <script>
 // API_BASE (the shared .NET backend host) is provided by menu.js.
 
-/* Wowhead is what turns the ids a combat log gives us into item, enchant and gem
-   names — the log carries no names at all. Point this at the expansion the
+/* The log names items and enchants itself; Wowhead supplies the hover tooltips and
+   the gem names (gems come through as bare ids). Point this at the expansion the
    Anniversary realms are on: 'classic' (vanilla), 'tbc', 'wotlk'. One line to
    flip when the guild progresses. */
 const WOWHEAD_DOMAIN = 'tbc';
@@ -326,22 +327,39 @@ function renderGear(gear, history){
     + (gear.itemLevel ? ' · item level ' + esc(gear.itemLevel) : '')
     + '. Hover an item for its tooltip.';
 
+  // A slot can hold more than one item: the log covers the whole night, so swapping
+  // a neck between bosses records both. Best item first, the rest noted underneath.
   const bySlot = {};
-  (gear.items || []).forEach(function(i){ bySlot[i.slot] = i; });
+  (gear.items || []).forEach(function(i){
+    (bySlot[i.slot] = bySlot[i.slot] || []).push(i);
+  });
+  Object.keys(bySlot).forEach(function(k){
+    bySlot[k].sort(function(a, b){ return (b.ilvl || 0) - (a.ilvl || 0); });
+  });
 
   const rows = SLOT_ORDER.filter(function(s){ return bySlot[s[0]]; }).map(function(s){
-    const it = bySlot[s[0]];
+    const worn = bySlot[s[0]];
+    const it = worn[0];
     // The enchant and gems ride along on the item's own tooltip; the gems also get
     // their own links below, since a gem id is an item id and so resolves to a name.
     const extra = (it.enchant ? '&ench=' + it.enchant : '')
                 + (it.gems && it.gems.length ? '&gems=' + it.gems.join(':') : '');
-    const link = whLink('item', it.id, 'Item ' + it.id, extra);
+    const link = whLink('item', it.id, it.name || ('Item ' + it.id), extra);
 
+    // The log names the enchant for us — an enchant id is not a spell id, so this
+    // text exists nowhere else.
     const lines = [];
-    if(it.enchant) lines.push('Enchanted');
+    if(it.enchantName) lines.push(esc(it.enchantName));
+    else if(it.enchant) lines.push('Enchanted');
     else if(ENCHANTABLE.indexOf(s[0]) >= 0) lines.push('<span class="cs-noench">No enchant</span>');
+    if(it.tempEnchantName) lines.push(esc(it.tempEnchantName));
     if(it.gems && it.gems.length){
       lines.push(it.gems.map(function(g){ return itemLink(g, 'Gem ' + g); }).join(', '));
+    }
+    if(worn.length > 1){
+      lines.push('<span class="cs-swap">also worn: '
+        + worn.slice(1).map(function(w){ return whLink('item', w.id, w.name || ('Item ' + w.id), ''); }).join(', ')
+        + '</span>');
     }
 
     return '<div class="cs-slot"><div class="cs-slot-label">' + esc(s[1]) + '</div>'
@@ -355,9 +373,11 @@ function renderGear(gear, history){
     : '<div class="cs-empty">The log recorded no items for this night.</div>';
 }
 
-// Slots worth calling out when they carry no enchant. Shirt/tabard/trinkets and
-// the like are never enchanted, so their absence is not news.
-const ENCHANTABLE = ['head','shoulder','back','chest','wrist','hands','legs','feet','mainhand','offhand','ranged'];
+// Slots worth calling out when they carry no enchant. Only the ones anyone can
+// enchant: trinkets and shirts never take one, and an off-hand or ranged slot is
+// as often a bag or a wand as it is an enchantable weapon — flagging those would
+// cry wolf on every caster.
+const ENCHANTABLE = ['head','shoulder','back','chest','wrist','hands','legs','feet','mainhand'];
 
 /* ───────────────────────── Loot & rolls ───────────────────────── */
 function renderLoot(loot){

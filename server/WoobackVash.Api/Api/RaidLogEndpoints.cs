@@ -395,10 +395,14 @@ public static class RaidLogEndpoints
             {
                 slot = i.Slot,
                 id = i.Id,
+                name = i.Name,
+                icon = i.Icon,
                 quality = i.Quality,
                 ilvl = i.ItemLevel,
                 enchant = i.Enchant,
+                enchantName = i.EnchantName,
                 tempEnchant = i.TempEnchant,
+                tempEnchantName = i.TempEnchantName,
                 gems = i.Gems
             }));
 

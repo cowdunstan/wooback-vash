@@ -45,11 +45,14 @@ board, identity links, loot, and attendance.
   stats; opened bare (`character.html`) it resolves to your own main.
   Gear comes from **Warcraft Logs**, not Blizzard: the attendance import stores a
   snapshot per character per report (see below), so the sheet reads the database,
-  not a live API, and older nights stay browsable in a picker. A combat log
-  carries only item/enchant/gem **ids**, so names, icons and stats come from
-  **Wowhead tooltips** — `WOWHEAD_DOMAIN` at the top of the page selects the
-  expansion (`classic`, `tbc`, …) and is the one line to change as the guild
-  progresses.
+  not a live API, and older nights stay browsable in a picker. The log names each
+  item and spells out its enchant ("+7 Spell Power and +4 Critical Strike") —
+  that text exists nowhere else, since an enchant id is not a spell id — while
+  **gems** arrive as bare item ids and are named by **Wowhead**, which also
+  supplies every hover tooltip. `WOWHEAD_DOMAIN` at the top of the page selects
+  the expansion (`classic`, `tbc`, …) and is the one line to change as the guild
+  progresses. A slot can list more than one item: `playerDetails` covers the whole
+  night, so a mid-raid swap shows up as "also worn".
 - **`sheet.html`** — a read-only `<iframe>` of the guild's loot / BIS sheet
   (`SHEET_EMBED_URL`), open to any signed-in tier. Reads the live sheet via its
   "anyone with the link" share setting, so the sign-in gate here is for the app's

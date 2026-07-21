@@ -257,10 +257,15 @@ public class WarcraftLogsService
             kept, actors.Count - kept.Count), null);
     }
 
-    /// <summary>One equipped item from a log's combatantInfo. Ids are all the log
-    /// carries — the sheet turns them into names via Wowhead tooltips.</summary>
-    public record GearItem(string Slot, long Id, int? Quality, double? ItemLevel,
-        long? Enchant, long? TempEnchant, List<long> Gems);
+    /// <summary>
+    /// One equipped item from a log's combatantInfo. The log names the item and its
+    /// enchants for us (the enchant name is the only place that text exists — an
+    /// enchant id is not a spell id, so nothing downstream could resolve it), but
+    /// gems come as bare item ids, which the sheet hands to Wowhead.
+    /// </summary>
+    public record GearItem(string Slot, long Id, string? Name, string? Icon, int? Quality,
+        double? ItemLevel, long? Enchant, string? EnchantName,
+        long? TempEnchant, string? TempEnchantName, List<long> Gems);
 
     /// <summary>What one player wore on the night, plus the spec/role the log gives them.</summary>
     public record PlayerGear(string Name, string? Realm, string? Cls, string? Spec,
@@ -361,7 +366,10 @@ public class WarcraftLogsService
                 var id = GetLong(g, "id");
                 if (id <= 0) continue; // empty slot
 
-                // The log usually carries its own slot index; fall back to position.
+                // The log carries its own slot index (0..18, matching SlotNames); fall
+                // back to position. Note a slot can repeat: playerDetails covers the
+                // whole report, so swapping a neck mid-night yields two entries with
+                // slot 1. Every one is kept — the sheet decides what to show.
                 var slotIndex = g.TryGetProperty("slot", out var sl) &&
                                 sl.ValueKind == JsonValueKind.Number && sl.TryGetInt32(out var si) ? si : index;
 
@@ -379,10 +387,14 @@ public class WarcraftLogsService
                 items.Add(new GearItem(
                     SlotName(slotIndex),
                     id,
+                    NullIfEmpty(GetString(g, "name")),
+                    NullIfEmpty(GetString(g, "icon")),
                     NullIfZeroInt(g, "quality"),
                     NullIfZeroDouble(g, "itemLevel"),
                     NullIfZeroLong(g, "permanentEnchant"),
+                    NullIfEmpty(GetString(g, "permanentEnchantName")),
                     NullIfZeroLong(g, "temporaryEnchant"),
+                    NullIfEmpty(GetString(g, "temporaryEnchantName")),
                     gems));
             }
         }
