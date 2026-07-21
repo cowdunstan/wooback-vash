@@ -63,6 +63,10 @@ public static class RaidLogEndpoints
                     note = l.Note,
                     awardedBy = l.AwardedBy,
                     awardedAt = l.AwardedAt,
+                    // Gargul's off-spec flag on the award itself. The stats page counts
+                    // OS wins with it; without it the winning roll's "OS" classification
+                    // is the only (lossier) signal.
+                    offSpec = l.OffSpec,
                     rolls = l.Rolls
                         .OrderByDescending(r => r.Amount)
                         .Select(r => new
