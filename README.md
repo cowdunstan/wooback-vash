@@ -166,9 +166,11 @@ officers can see who has left and ignore them. Create a client at
 https://develop.battle.net/access/clients (the redirect URL is unused for the Client
 Credentials flow) and set its id/secret as the `Blizzard__*` secrets above. The guild
 identity lives in `appsettings.json` (`Blizzard` section): wooback on **Dreamscythe
-(US)** via the `profile-classic1x-us` namespace — Dreamscythe is a Classic
-Anniversary realm, so the retail namespace does not see it. Officer-gated, and the
-sync only updates guild fields: it never creates, deletes, or ignores a character.
+(US)** via the `profile-classicann-us` namespace. Dreamscythe is a Classic
+**Anniversary** realm and only that namespace can see it — retail (`profile-us`) and
+Classic Era (`profile-classic1x-us`) both 404 on the guild, and the realm is missing
+from their realm indexes entirely. Officer-gated, and the sync only updates guild
+fields: it never creates, deletes, or ignores a character.
 
 ### 6. Loot sheet
 - No "Publish to web" needed. `SHEET_EMBED_URL` in `sheet.html` is the sheet's own

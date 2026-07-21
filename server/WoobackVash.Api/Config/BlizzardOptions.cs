@@ -3,8 +3,9 @@ namespace WoobackVash.Api.Config;
 /// <summary>
 /// Blizzard Game Data API config, used for the guild-roster sync. Credentials are
 /// secrets (env / user-secrets); the guild identity mirrors the Warcraft Logs one —
-/// wooback on Dreamscythe (US). Dreamscythe is a Classic Anniversary realm, so the
-/// namespace is the vanilla-classic one (profile-classic1x-us), not retail's.
+/// wooback on Dreamscythe (US). Dreamscythe is a Classic Anniversary realm, which has
+/// its own namespace (…-classicann-…): neither retail's (profile-us) nor Classic Era's
+/// (profile-classic1x-us) can see the realm at all — they 404 on the guild.
 /// </summary>
 public class BlizzardOptions
 {
@@ -12,7 +13,7 @@ public class BlizzardOptions
 
     public string OAuthUrl { get; set; } = "https://oauth.battle.net/token";
     public string ApiHost { get; set; } = "https://us.api.blizzard.com";
-    public string Namespace { get; set; } = "profile-classic1x-us";
+    public string Namespace { get; set; } = "profile-classicann-us";
     public string Locale { get; set; } = "en_US";
 
     public string ClientId { get; set; } = "";
