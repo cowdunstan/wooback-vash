@@ -19,6 +19,22 @@ public static class RaidLogEndpoints
     public record LootInput(string Event, string Character, string ItemName, long? ItemId, string? Note, string? Title);
     public record ImportInput(string Code);
 
+    // ── Gargul export DTOs ──────────────────────────────────────────────────
+    // Shapes mirror the Gargul addon's award JSON. Property names are matched
+    // case-insensitively by the default JSON options, so "itemID"/"awardedTo" bind.
+    public record GargulRoll(
+        int Amount, string? Class, string? Classification, string? Player,
+        int? Priority, int? PlusOneState, long Time);
+
+    public record GargulAward(
+        bool OS, bool SR, bool TMB, bool WL, bool PL,
+        List<GargulRoll>? Rolls, string? AwardedBy, string? AwardedTo,
+        string? Checksum, long? ItemID, string? ItemLink,
+        long Timestamp, int WinnerClass);
+
+    // Accepts either a bare Gargul array or a { "items": [...] } wrapper.
+    public record GargulImportInput(List<GargulAward>? Items);
+
     public static void MapRaidLogEndpoints(this IEndpointRouteBuilder app)
     {
         var loot = app.MapGroup("/api/loot");
@@ -30,11 +46,39 @@ public static class RaidLogEndpoints
             var db = ctx.RequestServices.GetService<AppDbContext>();
             if (db is null) return DbUnavailable();
 
-            var key = EventKey(ctx.Request.Query["event"]);
-            var rows = await db.LootAwards.AsNoTracking()
-                .Where(l => l.RaidEvent!.RhEventId == key)
+            // event= filters to one event key (manual path); omitted → all awards.
+            var eventRaw = ctx.Request.Query["event"].ToString();
+            var query = db.LootAwards.AsNoTracking().AsQueryable();
+            if (!string.IsNullOrWhiteSpace(eventRaw))
+            {
+                var key = EventKey(eventRaw);
+                query = query.Where(l => l.RaidEvent!.RhEventId == key);
+            }
+
+            var rows = await query
                 .OrderByDescending(l => l.AwardedAt)
-                .Select(l => new { id = l.Id, character = l.Character!.Name, itemName = l.ItemName, itemId = l.ItemId, note = l.Note, awardedAt = l.AwardedAt })
+                .Select(l => new
+                {
+                    id = l.Id,
+                    character = l.Character != null ? l.Character.Name : null,
+                    characterClass = l.Character != null ? l.Character.Class : null,
+                    disenchanted = l.Disenchanted,
+                    itemName = l.ItemName,
+                    itemId = l.ItemId,
+                    note = l.Note,
+                    awardedBy = l.AwardedBy,
+                    awardedAt = l.AwardedAt,
+                    rolls = l.Rolls
+                        .OrderByDescending(r => r.Amount)
+                        .Select(r => new
+                        {
+                            player = r.Character != null ? r.Character.Name : null,
+                            cls = r.Class,
+                            amount = r.Amount,
+                            classification = r.Classification,
+                            priority = r.Priority
+                        })
+                })
                 .ToListAsync();
             return Results.Json(rows);
         });
@@ -78,6 +122,105 @@ public static class RaidLogEndpoints
             db.LootAwards.Remove(award);
             await db.SaveChangesAsync();
             return Results.Json(new { ok = true });
+        });
+
+        // Bulk import a Gargul export: each award becomes a standalone LootAward
+        // (no raid event), disenchants are flagged, and every bid is stored as a
+        // LootRoll against its bidding character. Idempotent — awards already seen
+        // (matched on Gargul's checksum) are skipped, so re-importing is safe.
+        loot.MapPost("/import", async (HttpContext ctx, SessionTokenService tokens, GargulImportInput input) =>
+        {
+            var (_, error) = ctx.RequireOfficer(tokens);
+            if (error is not null) return error;
+            var db = ctx.RequestServices.GetService<AppDbContext>();
+            if (db is null) return DbUnavailable();
+
+            var awards = input.Items;
+            if (awards is null || awards.Count == 0)
+                return BadRequest("No Gargul awards found in the payload.");
+
+            // Which checksums do we already have? Skip those to stay idempotent.
+            var incoming = awards.Where(a => !string.IsNullOrWhiteSpace(a.Checksum))
+                                 .Select(a => a.Checksum!).Distinct().ToList();
+            var known = await db.LootAwards
+                .Where(l => l.Checksum != null && incoming.Contains(l.Checksum))
+                .Select(l => l.Checksum!)
+                .ToListAsync();
+            var seen = new HashSet<string>(known);
+
+            int imported = 0, skipped = 0, disenchants = 0, rollsRecorded = 0;
+            var newCharacters = 0;
+            // Cache resolved characters within this import so repeat bidders/winners
+            // don't each hit the DB (and to avoid double-adding a brand-new one).
+            var charCache = new Dictionary<string, Character>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var a in awards)
+            {
+                // De-dupe both against the DB and within this payload.
+                if (!string.IsNullOrWhiteSpace(a.Checksum) && !seen.Add(a.Checksum!))
+                {
+                    skipped++;
+                    continue;
+                }
+
+                var isDe = string.Equals(a.AwardedTo, "|de|", StringComparison.OrdinalIgnoreCase);
+                Character? winner = null;
+                if (!isDe && !string.IsNullOrWhiteSpace(a.AwardedTo))
+                {
+                    var (name, realm) = SplitNameRealm(a.AwardedTo!);
+                    (winner, var wasNew) = await ResolveBidder(db, charCache, name, realm, ClassName(a.WinnerClass));
+                    if (wasNew) newCharacters++;
+                }
+                else if (isDe)
+                {
+                    disenchants++;
+                }
+
+                var award = new LootAward
+                {
+                    Character = winner,
+                    ItemName = StripItemLink(a.ItemLink) ?? "Unknown item",
+                    ItemId = a.ItemID,
+                    AwardedBy = a.AwardedBy,
+                    Checksum = string.IsNullOrWhiteSpace(a.Checksum) ? null : a.Checksum,
+                    Disenchanted = isDe,
+                    WinnerClass = a.WinnerClass == 0 ? null : a.WinnerClass,
+                    OffSpec = a.OS,
+                    SoftReserve = a.SR,
+                    Tmb = a.TMB,
+                    Wishlist = a.WL,
+                    PlusOne = a.PL,
+                    AwardedAt = a.Timestamp > 0
+                        ? DateTimeOffset.FromUnixTimeSeconds(a.Timestamp)
+                        : DateTimeOffset.UtcNow
+                };
+
+                foreach (var r in a.Rolls ?? Enumerable.Empty<GargulRoll>())
+                {
+                    if (string.IsNullOrWhiteSpace(r.Player)) continue;
+                    var (bidder, bidderNew) = await ResolveBidder(db, charCache, r.Player!, null, r.Class);
+                    if (bidderNew) newCharacters++;
+                    award.Rolls.Add(new LootRoll
+                    {
+                        Character = bidder,
+                        Amount = r.Amount,
+                        Classification = NullIfBlank(r.Classification),
+                        Priority = r.Priority,
+                        PlusOneState = r.PlusOneState,
+                        Class = NullIfBlank(r.Class),
+                        RolledAt = r.Time > 0
+                            ? DateTimeOffset.FromUnixTimeSeconds(r.Time)
+                            : award.AwardedAt
+                    });
+                    rollsRecorded++;
+                }
+
+                db.LootAwards.Add(award);
+                imported++;
+            }
+
+            await db.SaveChangesAsync();
+            return Results.Json(new { imported, skipped, disenchants, rollsRecorded, newCharacters });
         });
 
         var attendance = app.MapGroup("/api/attendance");
@@ -216,6 +359,63 @@ public static class RaidLogEndpoints
     }
 
     private static string? NullIfBlank(string? s) => string.IsNullOrWhiteSpace(s) ? null : s;
+
+    // Find-or-create a character for a Gargul import (winner or bidder), caching by
+    // name within the import and backfilling realm/class when we learn them.
+    private static async Task<(Character Character, bool WasNew)> ResolveBidder(
+        AppDbContext db, Dictionary<string, Character> cache, string name, string? realm, string? cls)
+    {
+        var n = name.Trim();
+        if (cache.TryGetValue(n, out var cached))
+        {
+            cached.Realm ??= NullIfBlank(realm);
+            cached.Class ??= NullIfBlank(cls);
+            return (cached, false);
+        }
+
+        var lower = n.ToLower();
+        var c = await db.Characters.FirstOrDefaultAsync(x => x.Name.ToLower() == lower);
+        var wasNew = false;
+        if (c is null)
+        {
+            c = new Character { Name = n, Realm = NullIfBlank(realm), Class = NullIfBlank(cls) };
+            db.Characters.Add(c);
+            wasNew = true;
+        }
+        else
+        {
+            c.Realm ??= NullIfBlank(realm);
+            c.Class ??= NullIfBlank(cls);
+        }
+        cache[n] = c;
+        return (c, wasNew);
+    }
+
+    // "Name-Realm" → (Name, Realm). Splits on the first hyphen; realm may be null.
+    private static (string Name, string? Realm) SplitNameRealm(string awardedTo)
+    {
+        var s = awardedTo.Trim();
+        var dash = s.IndexOf('-');
+        return dash < 0 ? (s, null) : (s[..dash], NullIfBlank(s[(dash + 1)..]));
+    }
+
+    // Gargul's itemLink is a bracketed name, e.g. "[Boots of the Shifting Nightmare]".
+    private static string? StripItemLink(string? link)
+    {
+        var s = link?.Trim();
+        if (string.IsNullOrEmpty(s)) return null;
+        if (s.StartsWith('[') && s.EndsWith(']') && s.Length >= 2) s = s[1..^1];
+        return NullIfBlank(s);
+    }
+
+    // WoW class id → class string (matches the roster's lower-case class names).
+    private static string? ClassName(int id) => id switch
+    {
+        1 => "warrior", 2 => "paladin", 3 => "hunter", 4 => "rogue",
+        5 => "priest", 6 => "deathknight", 7 => "shaman", 8 => "mage",
+        9 => "warlock", 10 => "monk", 11 => "druid", 12 => "demonhunter",
+        _ => null
+    };
 
     private static async Task<RaidEvent> ResolveEvent(AppDbContext db, string? key, string? title)
     {

@@ -31,18 +31,33 @@
 <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="styles.css">
 <style>
-  .rl-toolbar{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;margin-bottom:8px}
   .rl-card{background:var(--panel,#0d1a17);border:1px solid var(--panel-line,#1e332d);border-radius:10px;padding:16px;margin-top:14px}
-  .rl-card h2{font-family:'Cinzel',serif;font-size:16px;margin:0 0 12px}
-  .rl-form{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px}
+  .rl-card h2{font-family:'Cinzel',serif;font-size:16px;margin:0 0 4px}
+  .rl-card .card-sub{color:var(--text-dim,#7f9a92);font-size:12px;margin:0 0 12px}
+  .rl-form{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
   .rl-form input,.rl-form select{background:#0a1815;border:1px solid var(--panel-line,#1e332d);color:var(--text,#dfeee9);border-radius:6px;padding:7px 9px;font-size:13px;font-family:'Inter'}
   .rl-form input.name{min-width:120px}.rl-form input.item{min-width:150px;flex:1}.rl-form input.note{min-width:110px;flex:1}
+  .rl-form input.event{min-width:150px}
+  textarea.rl-paste{width:100%;box-sizing:border-box;min-height:110px;background:#0a1815;border:1px solid var(--panel-line,#1e332d);color:var(--text,#dfeee9);border-radius:6px;padding:9px 10px;font-size:12px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;resize:vertical;margin-bottom:10px}
   table.rl{width:100%;border-collapse:collapse;font-size:13px}
   table.rl th{text-align:left;color:var(--text-dim,#7f9a92);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.6px;padding:6px 8px;border-bottom:1px solid var(--panel-line,#1e332d)}
-  table.rl td{padding:7px 8px;border-bottom:1px solid rgba(30,51,45,.5)}
+  /* Explicit colour: the page runs in quirks mode, where a <table> drops colour
+     inheritance, so plain cells would fall back to black. Muted cells / class-
+     coloured names override this. */
+  table.rl td{padding:7px 8px;border-bottom:1px solid rgba(30,51,45,.5);vertical-align:top;color:var(--text,#dff5ee)}
   table.rl .muted{color:var(--text-dim,#7f9a92)}
+  table.rl td strong{font-weight:600}
   .rl-empty{color:var(--text-dim,#7f9a92);padding:10px 8px;font-size:13px}
   .rl-del{background:none;border:none;color:var(--amber,#e0a53d);cursor:pointer;font-size:13px;padding:2px 6px}
+  .pill{display:inline-block;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600}
+  .pill-de{background:rgba(224,165,61,.18);color:#e0a53d}
+  .bids-toggle{background:none;border:none;color:var(--text-dim,#7f9a92);cursor:pointer;font-size:12px;padding:0;font-family:'Inter'}
+  .bids-toggle:hover{color:var(--text,#dfeee9)}
+  .bids{margin:6px 0 2px;padding:0;list-style:none;font-size:12px}
+  .bids li{padding:2px 0;color:var(--text-dim,#7f9a92)}
+  .bids .amt{display:inline-block;min-width:34px;color:var(--text,#dfeee9);font-weight:600}
+  .bids .cl{font-size:10px;text-transform:uppercase;letter-spacing:.4px;opacity:.75;margin-left:6px}
+  .banner{margin-top:12px;padding:11px 14px;border-radius:8px;font-size:13px;background:rgba(46,230,171,.10);border:1px solid rgba(46,230,171,.30);color:var(--text,#dfeee9);display:none}
 </style>
 
 <div class="app">
@@ -64,29 +79,38 @@
     </div>
 
     <h1>Loot log</h1>
-    <p class="subtitle">Per-raid loot awards. Pick a raid (a Raid-Helper event id, or the default board), then record who won what. Attendance now lives in its own <a href="attendance.html">Attendance</a> app.</p>
+    <p class="subtitle">Every item the guild has awarded. Paste a <a href="https://github.com/papa-smurf/Gargul" target="_blank" rel="noopener">Gargul</a> export to import a whole raid night at once — winners, disenchants, and every bid — or add a one-off award by hand. Attendance lives in its own <a href="attendance.html">Attendance</a> app.</p>
 
-    <div class="rl-toolbar">
-      <div class="field">
-        <label>Raid / event key</label>
-        <input list="rlEvents" type="text" id="eventKey" value="default" style="min-width:260px;">
-        <datalist id="rlEvents"></datalist>
+    <div class="rl-card">
+      <h2>Import from Gargul</h2>
+      <p class="card-sub">Paste the export from Gargul's award history (<em>/gargul awardhistory</em> → Export). Re-importing the same export is safe — items already recorded are skipped.</p>
+      <textarea class="rl-paste" id="gargulPaste" placeholder='[{"awardedTo":"Name-Realm","itemLink":"[Item]","itemID":30050, ...}]'></textarea>
+      <div class="rl-form">
+        <button class="btn-primary" id="importBtn" onclick="importGargul()">Import export</button>
+        <span id="importStatus" style="font-size:11.5px;color:var(--text-dim);min-height:15px;"></span>
       </div>
-      <button class="btn-primary" onclick="loadAll()">Load</button>
-      <span id="rlStatus" style="font-size:11.5px;color:var(--text-dim);min-height:15px;"></span>
+      <div class="banner" id="importBanner"></div>
     </div>
 
     <div class="rl-card">
-      <h2>Loot awards</h2>
+      <h2>Add an award by hand</h2>
+      <p class="card-sub">For a one-off item that didn't come through Gargul.</p>
       <div class="rl-form">
         <input class="name" id="lootName" placeholder="Character">
         <input class="item" id="lootItem" placeholder="Item">
         <input class="note" id="lootNote" placeholder="Note (optional)">
+        <input class="event" id="eventKey" placeholder="Event key (optional)">
         <button class="btn-ghost" onclick="addLoot()">Add</button>
       </div>
-      <table class="rl"><thead><tr><th>Item</th><th>Character</th><th>When</th><th></th></tr></thead>
-        <tbody id="lootBody"><tr><td colspan="4" class="rl-empty">Nothing loaded.</td></tr></tbody>
+    </div>
+
+    <div class="rl-card">
+      <h2>Loot awards</h2>
+      <p class="card-sub">All recorded awards, newest first.</p>
+      <table class="rl"><thead><tr><th>Item</th><th>Winner</th><th>When</th><th>Awarded by</th><th>Bids</th><th></th></tr></thead>
+        <tbody id="lootBody"><tr><td colspan="6" class="rl-empty">Loading…</td></tr></tbody>
       </table>
+      <span id="rlStatus" style="font-size:11.5px;color:var(--text-dim);display:block;margin-top:8px;"></span>
     </div>
 
     <footer>wooback guild tools — loot awards are saved to the guild database.</footer>
@@ -98,8 +122,25 @@
 // API_BASE (the shared .NET backend host) is provided by menu.js.
 function authHeaders(extra){ return Object.assign({ 'Authorization': 'Bearer ' + sessionToken() }, extra || {}); }
 function esc(s){ return String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
-function evKey(){ const v = document.getElementById('eventKey').value.trim(); return v || 'default'; }
 function setStatus(msg, isErr){ const el = document.getElementById('rlStatus'); el.textContent = msg || ''; el.style.color = isErr ? 'var(--amber)' : 'var(--text-dim)'; }
+function setImport(msg, isErr){ const el = document.getElementById('importStatus'); el.textContent = msg || ''; el.style.color = isErr ? 'var(--amber)' : 'var(--text-dim)'; }
+
+// WoW class colours (Blizzard palette), shared with attendance.html. Class strings
+// come from the roster (e.g. "warrior") or the Gargul roll data.
+const CLASS_COLORS = {
+  warrior:'#c79c6e', paladin:'#f58cba', hunter:'#abd473', rogue:'#fff569',
+  priest:'#ffffff', deathknight:'#e0475f', shaman:'#3b8de0', mage:'#69ccf0',
+  warlock:'#a99ce0', monk:'#00ff96', druid:'#ff7d0a', demonhunter:'#a330c9',
+  evoker:'#33937f'
+};
+function classColor(cls){
+  if(!cls) return null;
+  return CLASS_COLORS[String(cls).toLowerCase().replace(/[^a-z]/g,'')] || null;
+}
+function charName(name, cls){
+  const c = classColor(cls);
+  return '<strong' + (c ? ' style="color:' + c + '"' : '') + '>' + esc(name) + '</strong>';
+}
 
 // A fetch wrapper that maps the shared auth failures to friendly UX.
 async function api(path, opts){
@@ -111,31 +152,80 @@ async function api(path, opts){
 
 function fmtWhen(iso){ try{ const d = new Date(iso); return isNaN(d) ? '' : d.toLocaleDateString(undefined,{month:'short',day:'numeric'}) + ' ' + d.toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'}); }catch(e){ return ''; } }
 
+function bidsCell(rolls, id){
+  if(!rolls || !rolls.length) return '<span class="muted">—</span>';
+  const items = rolls.map(x=>
+    '<li><span class="amt">' + esc(x.amount) + '</span>' + charName(x.player || '?', x.cls) +
+    (x.classification ? '<span class="cl">' + esc(x.classification) + '</span>' : '') + '</li>'
+  ).join('');
+  return '<button class="bids-toggle" onclick="toggleBids(\''+id+'\')">' + rolls.length + ' bid' + (rolls.length===1?'':'s') + ' ▾</button>' +
+    '<ul class="bids" id="bids-'+id+'" style="display:none">' + items + '</ul>';
+}
+function toggleBids(id){ const el = document.getElementById('bids-'+id); if(el) el.style.display = el.style.display === 'none' ? '' : 'none'; }
+
 function renderLoot(rows){
   const b = document.getElementById('lootBody');
-  if(!rows.length){ b.innerHTML = '<tr><td colspan="4" class="rl-empty">No loot recorded yet.</td></tr>'; return; }
-  b.innerHTML = rows.map(r=>
-    '<tr><td>'+esc(r.itemName)+(r.note?' <span class="muted">— '+esc(r.note)+'</span>':'')+'</td>'+
-    '<td>'+esc(r.character)+'</td>'+
+  if(!rows.length){ b.innerHTML = '<tr><td colspan="6" class="rl-empty">No loot recorded yet. Paste a Gargul export above to get started.</td></tr>'; return; }
+  b.innerHTML = rows.map(r=>{
+    const winner = r.disenchanted
+      ? '<span class="pill pill-de">Disenchanted</span>'
+      : (r.character ? charName(r.character, r.characterClass) : '<span class="muted">—</span>');
+    return '<tr><td>'+esc(r.itemName)+(r.note?' <span class="muted">— '+esc(r.note)+'</span>':'')+'</td>'+
+    '<td>'+winner+'</td>'+
     '<td class="muted">'+esc(fmtWhen(r.awardedAt))+'</td>'+
-    '<td style="text-align:right;"><button class="rl-del" title="Delete" onclick="delLoot(\''+r.id+'\')">✕</button></td></tr>'
-  ).join('');
+    '<td class="muted">'+(r.awardedBy?esc(r.awardedBy):'—')+'</td>'+
+    '<td>'+bidsCell(r.rolls, r.id)+'</td>'+
+    '<td style="text-align:right;"><button class="rl-del" title="Delete" onclick="delLoot(\''+r.id+'\')">✕</button></td></tr>';
+  }).join('');
 }
 
 async function loadAll(){
   setStatus('Loading…');
   try{
-    const lRes = await api('/api/loot?event=' + encodeURIComponent(evKey()));
-    renderLoot(await lRes.json());
-    setStatus('Loaded ' + evKey() + '.');
+    const lRes = await api('/api/loot');
+    const rows = await lRes.json();
+    renderLoot(rows);
+    setStatus(rows.length + ' award' + (rows.length===1?'':'s') + ' recorded.');
   }catch(err){ if(!['401','403'].includes(err.message)) setStatus('Could not reach the guild database.', true); }
+}
+
+async function importGargul(){
+  const raw = document.getElementById('gargulPaste').value.trim();
+  const banner = document.getElementById('importBanner');
+  banner.style.display = 'none';
+  if(!raw){ setImport('Paste a Gargul export first.', true); return; }
+  let parsed;
+  try{ parsed = JSON.parse(raw); }
+  catch(e){ setImport('That is not valid JSON — copy the whole export.', true); return; }
+  const items = Array.isArray(parsed) ? parsed : parsed.items;
+  if(!Array.isArray(items) || !items.length){ setImport('No awards found in that export.', true); return; }
+
+  const btn = document.getElementById('importBtn');
+  btn.disabled = true;
+  setImport('Importing ' + items.length + ' awards…');
+  try{
+    const res = await api('/api/loot/import', { method:'POST', body: JSON.stringify({ items }) });
+    let data = {}; try{ data = await res.json(); }catch(e){}
+    if(!res.ok){ setImport((data && data.detail) || ('Import failed (HTTP ' + res.status + ').'), true); return; }
+    setImport('Done.');
+    banner.innerHTML = '<strong>' + data.imported + '</strong> imported' +
+      (data.skipped ? ' · <strong>' + data.skipped + '</strong> already recorded (skipped)' : '') +
+      (data.disenchants ? ' · ' + data.disenchants + ' disenchanted' : '') +
+      (data.rollsRecorded ? ' · ' + data.rollsRecorded + ' bids' : '') +
+      (data.newCharacters ? ' · ' + data.newCharacters + ' new character' + (data.newCharacters===1?'':'s') : '') + '.';
+    banner.style.display = '';
+    document.getElementById('gargulPaste').value = '';
+    loadAll();
+  }catch(err){ if(!['401','403'].includes(err.message)) setImport('Could not reach the guild database.', true); }
+  finally{ btn.disabled = false; }
 }
 
 async function addLoot(){
   const character = document.getElementById('lootName').value.trim();
   const itemName = document.getElementById('lootItem').value.trim();
   if(!character || !itemName){ setStatus('Enter a character and an item.', true); return; }
-  const body = { event: evKey(), character, itemName, note: document.getElementById('lootNote').value.trim() || null };
+  const ev = document.getElementById('eventKey').value.trim() || 'default';
+  const body = { event: ev, character, itemName, note: document.getElementById('lootNote').value.trim() || null };
   try{
     const res = await api('/api/loot', { method:'POST', body: JSON.stringify(body) });
     if(!res.ok){ setStatus('Save failed (HTTP ' + res.status + ').', true); return; }
@@ -152,16 +242,5 @@ async function delLoot(id){
   }catch(err){ if(!['401','403'].includes(err.message)) setStatus('Could not reach the guild database.', true); }
 }
 
-// Populate the event datalist with saved board keys for quick picking.
-async function loadEventOptions(){
-  try{
-    const res = await api('/api/board/list');
-    if(!res.ok) return;
-    const list = await res.json();
-    document.getElementById('rlEvents').innerHTML = list.map(x=>'<option value="'+esc(x.key)+'">').join('');
-  }catch(e){ /* non-fatal */ }
-}
-
-loadEventOptions();
 loadAll();
 </script>

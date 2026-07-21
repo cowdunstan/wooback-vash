@@ -12,6 +12,7 @@ public class AppDbContext : DbContext
     public DbSet<RaidEvent> RaidEvents => Set<RaidEvent>();
     public DbSet<BoardLayout> BoardLayouts => Set<BoardLayout>();
     public DbSet<LootAward> LootAwards => Set<LootAward>();
+    public DbSet<LootRoll> LootRolls => Set<LootRoll>();
     public DbSet<AttendanceRecord> Attendance => Set<AttendanceRecord>();
 
     protected override void OnModelCreating(ModelBuilder b)
@@ -51,9 +52,28 @@ public class AppDbContext : DbContext
 
         b.Entity<LootAward>(e =>
         {
+            // Both optional now: a Gargul import carries no event key, and a
+            // disenchant has no winning character. Detach (don't cascade) on delete.
             e.HasOne(x => x.RaidEvent)
              .WithMany(r => r.LootAwards)
              .HasForeignKey(x => x.RaidEventId)
+             .IsRequired(false)
+             .OnDelete(DeleteBehavior.SetNull);
+            e.HasOne(x => x.Character)
+             .WithMany()
+             .HasForeignKey(x => x.CharacterId)
+             .IsRequired(false)
+             .OnDelete(DeleteBehavior.SetNull);
+            // Gargul's per-award id — unique when present so re-import is idempotent.
+            // Postgres treats multiple NULLs as distinct, so manual awards are unaffected.
+            e.HasIndex(x => x.Checksum).IsUnique();
+        });
+
+        b.Entity<LootRoll>(e =>
+        {
+            e.HasOne(x => x.LootAward)
+             .WithMany(a => a.Rolls)
+             .HasForeignKey(x => x.LootAwardId)
              .OnDelete(DeleteBehavior.Cascade);
             e.HasOne(x => x.Character)
              .WithMany()

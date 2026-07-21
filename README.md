@@ -26,8 +26,11 @@ board, identity links, loot, and attendance.
 - **`attendance.html`** — **attendance** app (**officers only**): imports a
   Warcraft Logs report and marks its guild-tagged players present. Characters not
   yet linked to a member are created **unclaimed** for the roster to adopt.
-- **`loot.html`** — **loot** log (**officers only**): per-raid loot awards, saved
-  to the guild database.
+- **`loot.html`** — **loot** log (**officers only**): every awarded item, saved to
+  the guild database. Paste a **Gargul** export to import a whole raid night at once —
+  winners (class-coloured), disenchants, and every bid (stored per-character as rolls);
+  re-importing is idempotent (deduped on Gargul's per-award checksum). One-off items
+  can still be added by hand. Awards stand alone — they don't need a raid event.
 - **`members.html`** — **roster & alts** (**officers only**): the Discord↔main↔alts
   identity links; set mains, add/reassign characters, and **claim** the unclaimed
   characters that attendance & loot create. **Import from Discord** seeds the roster
@@ -65,7 +68,7 @@ A .NET 8 Minimal-API app (EF Core + Npgsql). Routes:
   jsonb), `/api/members` + `/api/characters` (Discord↔main↔alts identity links,
   incl. `?linked=false` for unclaimed characters, and `POST /api/members/import-discord`
   to seed link rows from the guild's member/officer roster via a bot token),
-  `/api/loot` (per-raid awards),
+  `/api/loot` (awards; `POST /import` bulk-loads a Gargul export, deduped on checksum),
   and `/api/attendance` — `POST /import` pulls a WCL report's guild-tagged roster
   into present rows (creating unclaimed characters), with `GET /events` and
   `GET ?code=` to browse it.
