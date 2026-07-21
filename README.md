@@ -42,9 +42,24 @@ board, identity links, loot, and attendance.
   "anyone with the link" share setting, so the sign-in gate here is for the app's
   flow, not a data barrier.
 - **`menu.js`** — shared session helpers, the `API_BASE` constant, and the
-  hamburger menu, used by every page. Every page loads it as `menu.js?v=N`; because
-  pages hard-depend on its `API_BASE`/`renderNav`, **bump that `?v=` on every page
-  when you change `menu.js`** so browsers can't serve a stale copy against new HTML.
+  hamburger menu, used by every page.
+
+### Asset caching
+
+Assets are referenced with plain URLs — no `?v=` stamps. **Changing `menu.js`,
+`app.js` or `styles.css` is a one-file change; no HTML needs touching.**
+
+GitHub Pages serves every file, HTML included, with `Cache-Control: max-age=600`
+plus an `ETag`. So a stale copy lives at most ~10 minutes, after which the
+browser revalidates and gets a cheap `304` or the new bytes. Version stamps in
+the HTML wouldn't shrink that window — the *HTML* carrying the stamp is cached
+for the same 600s — so they only cost a rewrite of every page per JS change.
+
+The one real exposure is skew: a page loaded fresh can pull a `menu.js` cached
+up to 10 minutes earlier. Keep that in mind for a change that breaks the
+contract between HTML and `menu.js` (renaming `API_BASE`, changing what
+`renderNav` expects) — ship it, wait out the window, then rely on it. For
+anything urgent, a hard refresh (Ctrl-F5) bypasses the cache immediately.
 
 Each page points at the backend through a single constant: `AUTH_BASE`
 (`index.html`), `RH_PROXY` + `API_BASE` (`app.js`), `WCL_BASE` (`logs.html`),

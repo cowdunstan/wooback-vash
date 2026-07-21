@@ -6,6 +6,12 @@
       "runtimeExecutable": "dotnet",
       "runtimeArgs": ["run", "--project", "server/WoobackVash.Api", "--launch-profile", "http"],
       "port": 8080
+    },
+    {
+      "name": "frontend",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["--yes", "serve", "--no-clipboard", "-l", "5173", "."],
+      "port": 5173
     }
   ]
 }
