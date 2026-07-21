@@ -173,7 +173,8 @@ function aggregate(rows){
     }
 
     if(rolls.length > (CONTESTED ? CONTESTED.count : 1)){
-      CONTESTED = { count: rolls.length, item: a.itemName, winner: a.disenchanted ? 'the shard pile' : a.character };
+      CONTESTED = { count: rolls.length, item: a.itemName, itemId: a.itemId,
+                    winner: a.disenchanted ? 'the shard pile' : a.character };
     }
 
     rolls.forEach(r => {
@@ -191,7 +192,7 @@ function aggregate(rows){
         c.streak = 0;
         // Beating nobody isn't luck, so a lone bid doesn't count as a steal.
         if(isFinite(amt) && rolls.length > 1 && (!LUCKIEST || amt < LUCKIEST.amount)){
-          LUCKIEST = { amount: amt, char: c, item: a.itemName, field: rolls.length };
+          LUCKIEST = { amount: amt, char: c, item: a.itemName, itemId: a.itemId, field: rolls.length };
         }
       }else{
         c.losses++;
@@ -314,12 +315,12 @@ function recordCards(){
     out.push({ emoji:'🎲', title:'Cheekiest win', blurb:'The lowest roll that somehow still won a contested item.',
       html:'<div class="ls-top"><span class="ls-name">' + nameHtml(LUCKIEST.char) + '</span>' +
            '<span class="ls-value">' + LUCKIEST.amount + '</span></div>' +
-           '<div class="ls-detail">won ' + esc(LUCKIEST.item) + ' against ' + (LUCKIEST.field - 1) +
+           '<div class="ls-detail">won ' + itemLink(LUCKIEST.itemId, LUCKIEST.item) + ' against ' + (LUCKIEST.field - 1) +
            ' other ' + (LUCKIEST.field === 2 ? 'roller' : 'rollers') + '</div>' });
   }
   if(CONTESTED){
     out.push({ emoji:'⚔️', title:'Most contested item', blurb:'The item that started the most arguments.',
-      html:'<div class="ls-top"><span class="ls-name">' + esc(CONTESTED.item) + '</span>' +
+      html:'<div class="ls-top"><span class="ls-name">' + itemLink(CONTESTED.itemId, CONTESTED.item) + '</span>' +
            '<span class="ls-value">' + CONTESTED.count + '</span></div>' +
            '<div class="ls-detail">rolls — it went to ' + esc(CONTESTED.winner || 'nobody') + '</div>' });
   }
@@ -343,6 +344,7 @@ function render(){
   s.innerHTML = summaryHtml();
   s.style.display = '';
   document.getElementById('msg').style.display = 'none';
+  loadWowhead(); // the story cards carry item links
 }
 
 function fail(text){

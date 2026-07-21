@@ -140,6 +140,9 @@ app.MapRaidLogEndpoints();
 // The character sheet: raid setup, gear snapshots, loot, rolls, attendance.
 app.MapCharacterSheetEndpoints();
 
+// The item page: who has it equipped, how often it dropped, and every roll on it.
+app.MapItemEndpoints();
+
 app.Run();
 
 // Converts postgres://user:pass@host:port/db[?sslmode=...] into an Npgsql keyword
