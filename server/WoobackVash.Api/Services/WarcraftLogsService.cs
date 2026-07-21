@@ -257,6 +257,195 @@ public class WarcraftLogsService
             kept, actors.Count - kept.Count), null);
     }
 
+    /// <summary>One equipped item from a log's combatantInfo. Ids are all the log
+    /// carries — the sheet turns them into names via Wowhead tooltips.</summary>
+    public record GearItem(string Slot, long Id, int? Quality, double? ItemLevel,
+        long? Enchant, long? TempEnchant, List<long> Gems);
+
+    /// <summary>What one player wore on the night, plus the spec/role the log gives them.</summary>
+    public record PlayerGear(string Name, string? Realm, string? Cls, string? Spec,
+        string? Role, double? ItemLevel, List<GearItem> Items);
+
+    // WoW equipment slot order as the combat log reports it (Classic has no
+    // ranged-slot ammo/relic split beyond index 17). The one place this mapping lives.
+    private static readonly string[] SlotNames =
+    {
+        "head", "neck", "shoulder", "shirt", "chest", "waist", "legs", "feet",
+        "wrist", "hands", "finger1", "finger2", "trinket1", "trinket2", "back",
+        "mainhand", "offhand", "ranged", "tabard"
+    };
+
+    /// <summary>Pulls every player's gear (with enchants and gems), spec and role from
+    /// one report. Feeds the gear snapshots behind the character sheet: the attendance
+    /// import calls this after its own roster pull, so a failure here degrades to "no
+    /// gear this time" rather than failing the import. One upstream call.
+    /// Returns (status, result, error) like <see cref="GetReportPlayersAsync"/>.</summary>
+    public async Task<(int Status, List<PlayerGear>? Result, string? Error)> GetReportGearAsync(string code)
+    {
+        if (string.IsNullOrWhiteSpace(code))
+            return (400, null, "A report code is required.");
+
+        var token = await GetTokenAsync();
+        if (token is null)
+            return (501, null, "Warcraft Logs API credentials are not set on the server yet.");
+
+        // playerDetails is an untyped JSON blob, so the whole report window is asked
+        // for at once (times are ms offsets from the report start; a wide end covers
+        // any night) and the shape is picked apart defensively below.
+        const string query =
+            "query($code:String!){reportData{report(code:$code){" +
+            "playerDetails(startTime:0,endTime:999999999,includeCombatantInfo:true)}}}";
+
+        var (status, doc, err) = await PostGraphQlAsync(token,
+            JsonSerializer.Serialize(new { query, variables = new { code } }));
+        if (doc is null) return (status, null, err);
+        using var _doc = doc;
+
+        if (!doc.RootElement.TryGetProperty("data", out var data) ||
+            !data.TryGetProperty("reportData", out var rd) ||
+            !rd.TryGetProperty("report", out var report) ||
+            !report.TryGetProperty("playerDetails", out var details))
+        {
+            var gqlErr = TryGetGqlError(doc.RootElement);
+            return (404, null, gqlErr ?? "No such Warcraft Logs report, or it is private.");
+        }
+
+        // The blob is usually wrapped: { data: { playerDetails: { tanks, healers, dps } } }.
+        if (details.ValueKind == JsonValueKind.Object &&
+            details.TryGetProperty("data", out var inner) &&
+            inner.ValueKind == JsonValueKind.Object &&
+            inner.TryGetProperty("playerDetails", out var unwrapped))
+            details = unwrapped;
+
+        if (details.ValueKind != JsonValueKind.Object)
+            return (200, new List<PlayerGear>(), null);
+
+        var players = new List<PlayerGear>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var bucket in details.EnumerateObject())
+        {
+            if (bucket.Value.ValueKind != JsonValueKind.Array) continue;
+            var role = RoleFromBucket(bucket.Name);
+            foreach (var p in bucket.Value.EnumerateArray())
+            {
+                if (p.ValueKind != JsonValueKind.Object) continue;
+                var name = GetString(p, "name");
+                if (string.IsNullOrWhiteSpace(name) || !seen.Add(name)) continue;
+                players.Add(ParsePlayer(p, name, role));
+            }
+        }
+        return (200, players, null);
+    }
+
+    // "tanks"/"healers"/"dps" → the role stored on the character. Anything else is
+    // an unfamiliar bucket, so no role is claimed.
+    private static string? RoleFromBucket(string bucket) => bucket.ToLowerInvariant() switch
+    {
+        "tanks" => "tank",
+        "healers" => "healer",
+        "dps" => "dps",
+        _ => null
+    };
+
+    private static PlayerGear ParsePlayer(JsonElement p, string name, string? role)
+    {
+        var items = new List<GearItem>();
+        if (p.TryGetProperty("combatantInfo", out var ci) && ci.ValueKind == JsonValueKind.Object &&
+            ci.TryGetProperty("gear", out var gear) && gear.ValueKind == JsonValueKind.Array)
+        {
+            var index = -1;
+            foreach (var g in gear.EnumerateArray())
+            {
+                index++;
+                if (g.ValueKind != JsonValueKind.Object) continue;
+                var id = GetLong(g, "id");
+                if (id <= 0) continue; // empty slot
+
+                // The log usually carries its own slot index; fall back to position.
+                var slotIndex = g.TryGetProperty("slot", out var sl) &&
+                                sl.ValueKind == JsonValueKind.Number && sl.TryGetInt32(out var si) ? si : index;
+
+                var gems = new List<long>();
+                if (g.TryGetProperty("gems", out var gemArr) && gemArr.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var gem in gemArr.EnumerateArray())
+                    {
+                        var gemId = gem.ValueKind == JsonValueKind.Object ? GetLong(gem, "id")
+                                  : gem.ValueKind == JsonValueKind.Number && gem.TryGetInt64(out var gv) ? gv : 0;
+                        if (gemId > 0) gems.Add(gemId);
+                    }
+                }
+
+                items.Add(new GearItem(
+                    SlotName(slotIndex),
+                    id,
+                    NullIfZeroInt(g, "quality"),
+                    NullIfZeroDouble(g, "itemLevel"),
+                    NullIfZeroLong(g, "permanentEnchant"),
+                    NullIfZeroLong(g, "temporaryEnchant"),
+                    gems));
+            }
+        }
+
+        // Average item level: the log's own figure when it has one, else the mean of
+        // what we parsed (0-ilvl entries, e.g. a tabard, would drag it down).
+        double? ilvl = NullIfZeroDouble(p, "maxItemLevel") ?? NullIfZeroDouble(p, "minItemLevel");
+        if (ilvl is null)
+        {
+            var rated = items.Where(i => i.ItemLevel is > 0).Select(i => i.ItemLevel!.Value).ToList();
+            if (rated.Count > 0) ilvl = Math.Round(rated.Average(), 1);
+        }
+
+        return new PlayerGear(
+            name,
+            NullIfEmpty(GetString(p, "server")),
+            NullIfEmpty(GetString(p, "type"))?.ToLowerInvariant(),
+            ParseSpec(p),
+            role,
+            ilvl,
+            items);
+    }
+
+    private static string SlotName(int index) =>
+        index >= 0 && index < SlotNames.Length ? SlotNames[index] : "slot" + index;
+
+    // specs is either ["Fury"] or [{ spec: "Fury" }]; icon ("Warrior-Fury") is the
+    // last resort. Lower-cased to match the class/spec strings used elsewhere.
+    private static string? ParseSpec(JsonElement p)
+    {
+        if (p.TryGetProperty("specs", out var specs) && specs.ValueKind == JsonValueKind.Array &&
+            specs.GetArrayLength() > 0)
+        {
+            var first = specs[0];
+            var s = first.ValueKind == JsonValueKind.String ? first.GetString()
+                  : first.ValueKind == JsonValueKind.Object ? GetString(first, "spec")
+                  : null;
+            if (!string.IsNullOrWhiteSpace(s)) return s!.ToLowerInvariant();
+        }
+
+        var icon = GetString(p, "icon");
+        var dash = icon.IndexOf('-');
+        return dash >= 0 && dash < icon.Length - 1 ? icon[(dash + 1)..].ToLowerInvariant() : null;
+    }
+
+    private static int? NullIfZeroInt(JsonElement e, string prop)
+    {
+        var v = (int)GetLong(e, prop);
+        return v == 0 ? null : v;
+    }
+
+    private static long? NullIfZeroLong(JsonElement e, string prop)
+    {
+        var v = GetLong(e, prop);
+        return v == 0 ? null : v;
+    }
+
+    private static double? NullIfZeroDouble(JsonElement e, string prop)
+    {
+        var v = GetDouble(e, prop);
+        return v == 0 ? null : v;
+    }
+
     /// <summary>True if the character's <c>guilds</c> list contains our guild name.</summary>
     private bool InGuild(JsonElement character)
     {

@@ -137,6 +137,9 @@ app.MapMembersEndpoints();
 // Loot + attendance history (Phase 4).
 app.MapRaidLogEndpoints();
 
+// The character sheet: raid setup, gear snapshots, loot, rolls, attendance.
+app.MapCharacterSheetEndpoints();
+
 app.Run();
 
 // Converts postgres://user:pass@host:port/db[?sslmode=...] into an Npgsql keyword

@@ -37,6 +37,19 @@ board, identity links, loot, and attendance.
   by creating a link row for every Discord member holding the member or officer role
   (needs the bot token below), so officers don't have to wait for each raider to
   sign in first.
+- **`character.html`** — the **character sheet**, open to any signed-in tier:
+  one character's raid setup (class/spec/role), the gear it last raided in —
+  every item with its **enchant and gems** — plus everything it has won, every
+  roll it has made, and its attendance, with an alt switcher across the member's
+  characters. Reached from a name anywhere on the roster, loot history or loot
+  stats; opened bare (`character.html`) it resolves to your own main.
+  Gear comes from **Warcraft Logs**, not Blizzard: the attendance import stores a
+  snapshot per character per report (see below), so the sheet reads the database,
+  not a live API, and older nights stay browsable in a picker. A combat log
+  carries only item/enchant/gem **ids**, so names, icons and stats come from
+  **Wowhead tooltips** — `WOWHEAD_DOMAIN` at the top of the page selects the
+  expansion (`classic`, `tbc`, …) and is the one line to change as the guild
+  progresses.
 - **`sheet.html`** — a read-only `<iframe>` of the guild's loot / BIS sheet
   (`SHEET_EMBED_URL`), open to any signed-in tier. Reads the live sheet via its
   "anyone with the link" share setting, so the sign-in gate here is for the app's
@@ -86,7 +99,15 @@ A .NET 8 Minimal-API app (EF Core + Npgsql). Routes:
   `/api/loot` (awards; `POST /import` bulk-loads a Gargul export, deduped on checksum),
   and `/api/attendance` — `POST /import` pulls a WCL report's guild-tagged roster
   into present rows (creating unclaimed characters), with `GET /events` and
-  `GET ?code=` to browse it.
+  `GET ?code=` to browse it. The same import makes a second WCL call for the
+  report's `playerDetails`, storing each character's **gear snapshot** (items,
+  enchants, gems) for that night and refreshing their spec/role; a failure there
+  is reported back but never costs the attendance rows.
+- **Character sheet** (any signed-in session) — `GET /api/characters/sheet`
+  (`?id=`, `?name=`, or nothing for the caller's own main) returns the character,
+  its alts, the newest gear snapshot with the list of earlier ones, its loot,
+  rolls and attendance; `GET /api/characters/sheet/history?id=&code=` returns one
+  earlier snapshot.
 - **Health** — `/healthz` (liveness), `/readyz` (DB reachability + error detail).
 
 Non-secret config (Discord client id, guild id, role ids, WCL guild identity)

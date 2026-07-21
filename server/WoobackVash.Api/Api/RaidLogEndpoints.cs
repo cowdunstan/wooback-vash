@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using WoobackVash.Api.Auth;
 using WoobackVash.Api.Data;
@@ -60,6 +61,9 @@ public static class RaidLogEndpoints
                 {
                     id = l.Id,
                     character = l.Character != null ? l.Character.Name : null,
+                    // The character's own id, so the history and stats pages can link
+                    // a name straight to its character sheet.
+                    characterId = l.CharacterId,
                     characterClass = l.Character != null ? l.Character.Class : null,
                     disenchanted = l.Disenchanted,
                     itemName = l.ItemName,
@@ -77,6 +81,7 @@ public static class RaidLogEndpoints
                         .Select(r => new
                         {
                             player = r.Character != null ? r.Character.Name : null,
+                            playerId = r.CharacterId,
                             cls = r.Class,
                             amount = r.Amount,
                             classification = r.Classification,
@@ -340,15 +345,85 @@ public static class RaidLogEndpoints
             }
             await db.SaveChangesAsync();
 
+            // Second upstream call: what everyone was wearing. Never fatal — the
+            // attendance rows above are already saved, so a gear failure just means
+            // no snapshot this time and the reason is handed back to the officer.
+            var (gearSnapshots, gearError) = await ImportGear(db, wcl, result.Code, ev, characters);
+
             return Results.Json(new
             {
                 code = result.Code,
                 title = ev.Title,
                 imported = characters.Count,
                 newCharacters,
-                filteredOut = result.FilteredOut
+                filteredOut = result.FilteredOut,
+                gearSnapshots,
+                gearError
             });
         });
+    }
+
+    // Pull the report's gear and store one snapshot per character, upserted on
+    // (character, report) so re-importing a night updates rather than duplicates.
+    // Also refreshes each character's raid setup (spec + role) from the log.
+    // Returns (snapshots written, error message or null).
+    private static async Task<(int Count, string? Error)> ImportGear(
+        AppDbContext db, WarcraftLogsService wcl, string code, RaidEvent ev, List<Character> characters)
+    {
+        var (_, players, err) = await wcl.GetReportGearAsync(code);
+        if (players is null) return (0, err ?? "Gear could not be read from the report.");
+
+        var byName = new Dictionary<string, Character>(StringComparer.OrdinalIgnoreCase);
+        foreach (var c in characters) byName[c.Name] = c;
+
+        var ids = characters.Select(c => c.Id).ToList();
+        var existing = await db.GearSnapshots
+            .Where(s => s.WclReportCode == code && ids.Contains(s.CharacterId))
+            .ToDictionaryAsync(s => s.CharacterId, s => s);
+
+        var recordedAt = ev.StartsAt ?? DateTimeOffset.UtcNow;
+        var now = DateTimeOffset.UtcNow;
+        var count = 0;
+
+        foreach (var p in players)
+        {
+            // Only characters the attendance pass kept — a log holds pugs too.
+            if (!byName.TryGetValue(p.Name, out var ch)) continue;
+            if (p.Items.Count == 0) continue;
+
+            var items = JsonSerializer.Serialize(p.Items.Select(i => new
+            {
+                slot = i.Slot,
+                id = i.Id,
+                quality = i.Quality,
+                ilvl = i.ItemLevel,
+                enchant = i.Enchant,
+                tempEnchant = i.TempEnchant,
+                gems = i.Gems
+            }));
+
+            if (!existing.TryGetValue(ch.Id, out var snap))
+            {
+                snap = new CharacterGearSnapshot { CharacterId = ch.Id, WclReportCode = code };
+                db.GearSnapshots.Add(snap);
+            }
+            snap.RaidEventId = ev.Id;
+            snap.Spec = p.Spec;
+            snap.ItemLevel = p.ItemLevel;
+            snap.Items = items;
+            snap.RecordedAt = recordedAt;
+            snap.ImportedAt = now;
+            count++;
+
+            // The character's current raid setup, as last seen in a log.
+            if (!string.IsNullOrWhiteSpace(p.Spec)) ch.Spec = p.Spec;
+            if (!string.IsNullOrWhiteSpace(p.Role)) ch.Role = p.Role;
+            ch.Class ??= p.Cls;
+            if (p.Spec is not null || p.Role is not null) ch.SetupUpdatedAt = now;
+        }
+
+        await db.SaveChangesAsync();
+        return (count, null);
     }
 
     // Find-or-create the RaidEvent for a WCL report, filling meta from the report.

@@ -54,6 +54,9 @@
   .chr:last-child{border-bottom:none}
   .chr-top{display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:13px}
   .chr-meta{color:var(--text-dim,#7f9a92);font-size:11.5px;margin-top:2px}
+  /* Names link to the character sheet; the class colour stays the only colour. */
+  .chr-link{text-decoration:none}
+  .chr-link:hover strong{text-decoration:underline}
   .chr-actions{display:flex;flex-wrap:wrap;gap:4px;align-items:center;margin-top:6px}
   .chr-actions select{flex:1 1 120px;min-width:0;background:#0a1815;border:1px solid var(--panel-line,#1e332d);color:var(--text,#dfeee9);border-radius:6px;padding:4px 6px;font-size:12px;font-family:'Inter'}
   .mem-empty{color:var(--text-dim,#7f9a92);padding:10px 14px;font-size:12.5px}
@@ -151,9 +154,11 @@ function classColor(cls){
   return CLASS_COLORS[String(cls).toLowerCase().replace(/[^a-z]/g,'')] || null;
 }
 // A character name, coloured by class so it's legible and identifiable at a glance.
-function charName(name, cls){
+// With an id, the name links to the character's sheet (gear, loot, rolls).
+function charName(name, cls, id){
   const c = classColor(cls);
-  return '<strong' + (c ? ' style="color:' + c + '"' : '') + '>' + esc(name) + '</strong>';
+  const inner = '<strong' + (c ? ' style="color:' + c + '"' : '') + '>' + esc(name) + '</strong>';
+  return id ? '<a href="character.html?id=' + esc(id) + '" class="chr-link">' + inner + '</a>' : inner;
 }
 function setStatus(msg, isErr){ const el = document.getElementById('rlStatus'); el.textContent = msg || ''; el.style.color = isErr ? 'var(--amber)' : 'var(--text-dim)'; }
 
@@ -216,7 +221,7 @@ function renderMembers(members){
         const meta = [clsSpec(c), c.realm ? esc(c.realm) : null].filter(Boolean).join(' <span class="muted">·</span> ');
         const quoted = esc(c.name).replace(/'/g,"\\'");
         return '<div class="chr">' +
-          '<div class="chr-top">' + charName(c.name, c.cls) +
+          '<div class="chr-top">' + charName(c.name, c.cls, c.id) +
             (c.isMain ? '<span class="pill pill-main">Main</span>' : '<span class="pill pill-alt">Alt</span>') +
             guildBadge(c) +
           '</div>' +
@@ -256,7 +261,7 @@ function renderOrphans(rows){
   if(!rows.length){ b.innerHTML = '<tr><td colspan="4" class="rl-empty">No unlinked characters — every character is attached to a member.</td></tr>'; return; }
   b.innerHTML = rows.map(c =>
     '<tr>' +
-      '<td>' + charName(c.name, c.cls) + ' ' + guildBadge(c) + '</td>' +
+      '<td>' + charName(c.name, c.cls, c.id) + ' ' + guildBadge(c) + '</td>' +
       '<td>' + clsSpec(c) + '</td>' +
       '<td class="muted">' + (c.realm ? esc(c.realm) : '—') + '</td>' +
       '<td><div class="row-actions">' + memberSelect('', 'reassign(\'' + c.id + '\', this.value)') +
@@ -274,7 +279,7 @@ function renderIgnored(rows){
   b.innerHTML = rows.map(c => {
     const quoted = esc(c.name).replace(/'/g,"\\'");
     return '<tr>' +
-      '<td>' + charName(c.name, c.cls) + '</td>' +
+      '<td>' + charName(c.name, c.cls, c.id) + '</td>' +
       '<td>' + clsSpec(c) + '</td>' +
       '<td>' + guildBadge(c) + '</td>' +
       '<td class="muted">' + (c.member ? esc(c.member) : '<span class="muted">unlinked</span>') + '</td>' +

@@ -168,7 +168,13 @@ async function pull(){
     let data = {}; try{ data = await res.json(); }catch(e){}
     if(!res.ok){ setPull((data && data.detail) || ('Import failed (HTTP ' + res.status + ').'), true); return; }
     const filtered = data.filteredOut ? ' · ' + data.filteredOut + ' non-guild filtered out' : '';
-    setPull('Imported ' + data.imported + ' present' + filtered + '.');
+    // The same pull also snapshots everyone's gear for the character sheets. It is
+    // a second call to Warcraft Logs, so it can fail on its own without costing us
+    // the attendance rows — say which happened.
+    const gear = data.gearError
+      ? ' · gear not read (' + data.gearError + ')'
+      : (data.gearSnapshots ? ' · ' + data.gearSnapshots + ' gear snapshot' + (data.gearSnapshots === 1 ? '' : 's') : '');
+    setPull('Imported ' + data.imported + ' present' + filtered + gear + '.', !!data.gearError);
     if(data.newCharacters){
       const b = document.getElementById('newBanner');
       b.innerHTML = data.newCharacters + ' new character' + (data.newCharacters === 1 ? '' : 's') +

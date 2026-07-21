@@ -14,6 +14,7 @@ public class AppDbContext : DbContext
     public DbSet<LootAward> LootAwards => Set<LootAward>();
     public DbSet<LootRoll> LootRolls => Set<LootRoll>();
     public DbSet<AttendanceRecord> Attendance => Set<AttendanceRecord>();
+    public DbSet<CharacterGearSnapshot> GearSnapshots => Set<CharacterGearSnapshot>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -94,6 +95,23 @@ public class AppDbContext : DbContext
              .HasForeignKey(x => x.CharacterId)
              .OnDelete(DeleteBehavior.Restrict);
             e.Property(x => x.Status).HasConversion<string>();
+        });
+
+        b.Entity<CharacterGearSnapshot>(e =>
+        {
+            // Same treatment as BoardLayout.State — jsonb, not text.
+            e.Property(x => x.Items).HasColumnType("jsonb");
+            // One snapshot per character per report, so a re-import updates in place.
+            e.HasIndex(x => new { x.CharacterId, x.WclReportCode }).IsUnique();
+            e.HasOne(x => x.Character)
+             .WithMany()
+             .HasForeignKey(x => x.CharacterId)
+             .OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.RaidEvent)
+             .WithMany()
+             .HasForeignKey(x => x.RaidEventId)
+             .IsRequired(false)
+             .OnDelete(DeleteBehavior.SetNull);
         });
     }
 }

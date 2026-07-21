@@ -1,0 +1,453 @@
+<meta charset="utf-8">
+<script>
+/* Access gate. Same as loot-history.html / loot-stats.html: the character sheet
+   is open to any signed-in tier — it is built from /api/characters/sheet, which
+   is session-gated; this only decides whether the page renders at all. */
+(function(){
+  var m = location.hash.match(/(?:^#|&)session=([^&]+)/);
+  if(m){
+    try{ localStorage.setItem('vashj_session', decodeURIComponent(m[1])); }catch(e){}
+    history.replaceState(null, '', location.pathname + location.search);
+  }
+  function valid(tok){
+    if(!tok) return false;
+    try{
+      var p = tok.split('.')[0].replace(/-/g,'+').replace(/_/g,'/');
+      while(p.length % 4) p += '=';
+      var payload = JSON.parse(atob(p));
+      return payload.exp && payload.exp > Math.floor(Date.now()/1000);
+    }catch(e){ return false; }
+  }
+  var tok = null;
+  try{ tok = localStorage.getItem('vashj_session'); }catch(e){}
+  if(!valid(tok)){
+    try{ localStorage.removeItem('vashj_session'); }catch(e){}
+    location.replace('index.html');
+  }
+})();
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+<style>
+  /* cs- = character sheet. Prefixed because styles.css already owns .sheet-*
+     (the loot-sheet iframe page). */
+  .cs-head{
+    background:var(--panel);border:1px solid var(--panel-line);border-radius:10px;
+    padding:16px 18px;margin-bottom:16px;
+  }
+  .cs-name{font-family:'Cinzel',serif;font-size:26px;font-weight:700;line-height:1.1}
+  .cs-sub{font-size:12.5px;color:var(--text-dim);margin-top:6px}
+  .cs-sub b{color:var(--text);font-weight:600}
+  .cs-alts{display:flex;flex-wrap:wrap;gap:7px;margin-top:12px}
+  .cs-alt{
+    display:inline-block;background:#132824;border:1px solid var(--panel-line);
+    border-radius:6px;padding:4px 10px;font-size:12px;text-decoration:none;color:var(--text);
+  }
+  .cs-alt:hover{border-color:var(--teal-dim)}
+  .cs-alt.here{border-color:var(--teal);color:var(--teal)}
+
+  .cs-panel{
+    background:var(--panel);border:1px solid var(--panel-line);border-radius:10px;
+    padding:14px 18px 16px;margin-bottom:16px;
+  }
+  .cs-panel h2{
+    font-family:'Cinzel',serif;font-size:15px;font-weight:700;margin:0 0 4px;
+    color:#eafff6;letter-spacing:.3px;
+  }
+  .cs-panel-note{font-size:11.5px;color:var(--text-dim);margin:0 0 12px}
+  .cs-panel-note a{color:var(--teal)}
+  .cs-empty{font-size:12.5px;color:var(--text-dim);font-style:italic;padding:6px 0}
+
+  /* Gear: two columns of slots, stacking on a narrow screen. */
+  .cs-gear{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:8px 22px}
+  .cs-slot{display:flex;gap:10px;align-items:flex-start;padding:5px 0;border-bottom:1px solid rgba(31,74,63,.4)}
+  .cs-slot-label{
+    flex:0 0 68px;font-size:10px;text-transform:uppercase;letter-spacing:.8px;
+    color:var(--text-dim);padding-top:3px;
+  }
+  .cs-slot-body{min-width:0;flex:1}
+  .cs-item{font-size:13px;font-weight:600;word-break:break-word}
+  .cs-extra{font-size:11.5px;color:var(--text-dim);margin-top:1px}
+  .cs-extra a{color:inherit}
+  .cs-noench{color:var(--amber)}
+
+  .cs-picker{margin-left:auto;font-size:12px}
+  .cs-picker select{
+    background:#0b1a17;color:var(--text);border:1px solid var(--panel-line);
+    border-radius:6px;padding:4px 8px;font-family:inherit;font-size:12px;
+  }
+  .cs-panel-head{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
+
+  .cs-tiles{display:flex;flex-wrap:wrap;gap:22px;margin-bottom:12px}
+  .cs-tiles div{font-size:11.5px;color:var(--text-dim)}
+  .cs-tiles b{display:block;font-size:20px;color:var(--text);font-weight:700;font-family:'Cinzel',serif}
+
+  table.cs-table{width:100%;border-collapse:collapse;font-size:12.5px}
+  .cs-table th{
+    text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.9px;
+    color:var(--text-dim);font-weight:600;padding:0 10px 6px 0;
+  }
+  .cs-table td{padding:5px 10px 5px 0;border-top:1px solid rgba(31,74,63,.4);vertical-align:top}
+  .cs-table td.num{text-align:right;padding-right:16px;font-variant-numeric:tabular-nums}
+  .cs-tag{
+    font-size:9px;font-weight:700;letter-spacing:.5px;border-radius:3px;padding:1px 4px;
+    text-transform:uppercase;background:rgba(232,163,61,.22);color:var(--amber);margin-left:5px;
+  }
+  .cs-won{color:var(--teal);font-weight:600}
+  .cs-lost{color:var(--text-dim)}
+  .cs-msg{color:var(--text-dim);padding:26px 4px;font-size:13.5px}
+</style>
+
+<div class="app">
+  <div class="wrap">
+    <div class="authbar">
+      <span class="authbar-left">
+        <div class="nav">
+          <button class="hamburger" id="navToggle" aria-label="Menu" aria-expanded="false" aria-controls="navDrawer">
+            <span></span><span></span><span></span>
+          </button>
+          <nav class="nav-drawer" id="navDrawer"></nav>
+        </div>
+        <span class="eyebrow">Character sheet</span>
+      </span>
+      <span class="authbar-right">
+        <span id="authWho" class="auth-who"></span>
+        <button class="btn-ghost" onclick="logout()">Sign out</button>
+      </span>
+    </div>
+
+    <div id="sheet" style="display:none">
+      <div class="cs-head" id="head"></div>
+
+      <section class="cs-panel">
+        <div class="cs-panel-head">
+          <h2>Equipped</h2>
+          <span class="cs-picker" id="gearPicker"></span>
+        </div>
+        <p class="cs-panel-note" id="gearNote"></p>
+        <div id="gear"></div>
+      </section>
+
+      <section class="cs-panel">
+        <h2>Loot won</h2>
+        <p class="cs-panel-note">Every item this character has been awarded.</p>
+        <div id="loot"></div>
+      </section>
+
+      <section class="cs-panel">
+        <h2>Rolls</h2>
+        <p class="cs-panel-note">Every roll recorded from a Gargul import — what they rolled, and who beat them.</p>
+        <div class="cs-tiles" id="rollTiles"></div>
+        <div id="rolls"></div>
+      </section>
+
+      <section class="cs-panel">
+        <h2>Attendance</h2>
+        <p class="cs-panel-note">Raids this character was logged in, newest first.</p>
+        <div id="attendance"></div>
+      </section>
+    </div>
+
+    <div id="msg" class="cs-msg">Loading…</div>
+
+    <footer>wooback guild tools</footer>
+  </div>
+</div>
+
+<script src="menu.js"></script>
+<script>
+// API_BASE (the shared .NET backend host) is provided by menu.js.
+
+/* Wowhead is what turns the ids a combat log gives us into item, enchant and gem
+   names — the log carries no names at all. Point this at the expansion the
+   Anniversary realms are on: 'classic' (vanilla), 'tbc', 'wotlk'. One line to
+   flip when the guild progresses. */
+const WOWHEAD_DOMAIN = 'tbc';
+var whTooltips = { colorLinks:true, iconizeLinks:true, renameLinks:true };
+
+const WCL_HOST = 'https://fresh.warcraftlogs.com';
+
+function esc(s){ return String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+// WoW class colours (Blizzard palette), shared with loot-history.html / loot-stats.html.
+const CLASS_COLORS = {
+  warrior:'#c79c6e', paladin:'#f58cba', hunter:'#abd473', rogue:'#fff569',
+  priest:'#ffffff', deathknight:'#e0475f', shaman:'#3b8de0', mage:'#69ccf0',
+  warlock:'#a99ce0', monk:'#00ff96', druid:'#ff7d0a', demonhunter:'#a330c9',
+  evoker:'#33937f'
+};
+function classColor(cls){
+  if(!cls) return null;
+  return CLASS_COLORS[String(cls).toLowerCase().replace(/[^a-z]/g,'')] || null;
+}
+
+function fmtDate(s){
+  if(!s) return '';
+  const d = new Date(s);
+  return isNaN(d) ? '' : d.toLocaleDateString(undefined, { day:'numeric', month:'short', year:'numeric' });
+}
+// "destruction" → "Destruction", but "dps" is an abbreviation, not a word.
+function cap(s){
+  if(!s) return '';
+  const t = String(s);
+  return t.toLowerCase() === 'dps' ? 'DPS' : t.charAt(0).toUpperCase() + t.slice(1);
+}
+
+/* A Wowhead link. `text` is a placeholder — with renameLinks the widget swaps in
+   the real name (and its quality colour); if the widget is blocked, the
+   placeholder is what the reader sees, so it must stand on its own. */
+function whLink(kind, id, text, extra){
+  if(!id) return esc(text || '');
+  const data = kind + '=' + id + (extra || '');
+  return '<a href="https://www.wowhead.com/' + WOWHEAD_DOMAIN + '/' + kind + '=' + id + '"'
+       + ' data-wowhead="' + esc(data) + '" target="_blank" rel="noopener">' + esc(text || (kind + ' ' + id)) + '</a>';
+}
+function itemLink(id, name){ return whLink('item', id, name || ('Item ' + id)); }
+
+/* ───────────────────────── Load ───────────────────────── */
+const params = new URLSearchParams(location.search);
+let CURRENT_ID = null;
+
+async function api(path){
+  const res = await fetch(API_BASE + path, { headers:{ 'Authorization':'Bearer ' + sessionToken() } });
+  if(res.status === 401){ logout(); throw new Error('signed out'); }
+  const body = await res.json().catch(() => null);
+  if(!res.ok) throw new Error((body && body.detail) || ('HTTP ' + res.status));
+  return body;
+}
+
+async function load(){
+  const q = params.get('id') ? '?id=' + encodeURIComponent(params.get('id'))
+          : params.get('name') ? '?name=' + encodeURIComponent(params.get('name'))
+          : '';
+  let data;
+  try{ data = await api('/api/characters/sheet' + q); }
+  catch(err){
+    document.getElementById('msg').textContent = err.message;
+    return;
+  }
+  CURRENT_ID = data.character.id;
+  render(data);
+  document.getElementById('msg').style.display = 'none';
+  document.getElementById('sheet').style.display = '';
+  loadWowhead();
+}
+
+function render(d){
+  renderHead(d.character);
+  renderGear(d.gear, d.gearHistory);
+  renderLoot(d.loot);
+  renderRolls(d.rolls, d.summary);
+  renderAttendance(d.attendance);
+}
+
+function renderHead(c){
+  const col = classColor(c.cls);
+  const bits = [];
+  if(c.spec) bits.push(cap(c.spec));
+  if(c.cls) bits.push(cap(c.cls));
+  if(c.role) bits.push(cap(c.role));
+  if(c.realm) bits.push(c.realm);
+
+  const guild = c.guildSyncedAt
+    ? (c.guildName ? '&lt;' + esc(c.guildName) + '&gt;' + (c.guildRank === 0 ? ' (GM)' : '')
+                   : '<span class="cs-noench">not in the guild at the last sync</span>')
+    : 'guild not synced yet';
+
+  const alts = [{ id:c.id, name:c.name, cls:c.cls, isMain:c.isMain }].concat(c.alts || []);
+  const altHtml = alts.length > 1
+    ? '<div class="cs-alts">' + alts.map(function(a){
+        const ac = classColor(a.cls);
+        return '<a class="cs-alt' + (a.id === c.id ? ' here' : '') + '" href="character.html?id=' + esc(a.id) + '">'
+             + '<span' + (ac ? ' style="color:' + ac + '"' : '') + '>' + esc(a.name) + '</span>'
+             + (a.isMain ? ' <span class="cs-tag">main</span>' : '') + '</a>';
+      }).join('') + '</div>'
+    : '';
+
+  document.getElementById('head').innerHTML =
+      '<div class="cs-name"' + (col ? ' style="color:' + col + '"' : '') + '>' + esc(c.name) + '</div>'
+    + '<div class="cs-sub">' + (bits.length ? '<b>' + esc(bits.join(' · ')) + '</b> — ' : '') + guild + '</div>'
+    + '<div class="cs-sub">'
+    + (c.member ? 'Played by <b>' + esc(c.member.name) + '</b>. ' : 'Not linked to a Discord member yet. ')
+    + (c.setupUpdatedAt ? 'Setup last seen in a log on ' + esc(fmtDate(c.setupUpdatedAt)) + '.' : '')
+    + '</div>'
+    + altHtml;
+}
+
+/* ───────────────────────── Gear ─────────────────────────
+   Paperdoll order, so the list reads like the in-game character pane. Slots the
+   snapshot has nothing for are simply left out. */
+const SLOT_ORDER = [
+  ['head','Head'], ['neck','Neck'], ['shoulder','Shoulder'], ['back','Back'],
+  ['chest','Chest'], ['shirt','Shirt'], ['tabard','Tabard'], ['wrist','Wrist'],
+  ['hands','Hands'], ['waist','Waist'], ['legs','Legs'], ['feet','Feet'],
+  ['finger1','Ring 1'], ['finger2','Ring 2'], ['trinket1','Trinket 1'], ['trinket2','Trinket 2'],
+  ['mainhand','Main hand'], ['offhand','Off hand'], ['ranged','Ranged']
+];
+
+function renderGear(gear, history){
+  const picker = document.getElementById('gearPicker');
+  const note = document.getElementById('gearNote');
+  const box = document.getElementById('gear');
+
+  if(!gear){
+    picker.innerHTML = '';
+    note.textContent = '';
+    box.innerHTML = '<div class="cs-empty">No gear snapshot yet — gear is read from a Warcraft Logs '
+                  + 'report when an officer imports its attendance.</div>';
+    return;
+  }
+
+  // Older nights, when there are any.
+  if(history && history.length > 1){
+    picker.innerHTML = '<select id="gearSelect">' + history.map(function(h){
+      const label = fmtDate(h.recordedAt) + (h.title ? ' — ' + h.title : '');
+      return '<option value="' + esc(h.reportCode) + '"' + (h.reportCode === gear.reportCode ? ' selected' : '') + '>'
+           + esc(label) + '</option>';
+    }).join('') + '</select>';
+    document.getElementById('gearSelect').addEventListener('change', async function(e){
+      const code = e.target.value;
+      try{
+        const snap = await api('/api/characters/sheet/history?id=' + encodeURIComponent(CURRENT_ID)
+                             + '&code=' + encodeURIComponent(code));
+        renderGear(snap, history);
+        loadWowhead();
+      }catch(err){ note.textContent = err.message; }
+    });
+  }else{
+    picker.innerHTML = '';
+  }
+
+  const when = fmtDate(gear.recordedAt);
+  note.innerHTML = 'As raided on ' + esc(when)
+    + (gear.title ? ' — ' + esc(gear.title) : '')
+    + ' (<a href="' + WCL_HOST + '/reports/' + esc(gear.reportCode) + '" target="_blank" rel="noopener">log</a>)'
+    + (gear.itemLevel ? ' · item level ' + esc(gear.itemLevel) : '')
+    + '. Hover an item for its tooltip.';
+
+  const bySlot = {};
+  (gear.items || []).forEach(function(i){ bySlot[i.slot] = i; });
+
+  const rows = SLOT_ORDER.filter(function(s){ return bySlot[s[0]]; }).map(function(s){
+    const it = bySlot[s[0]];
+    // The enchant and gems ride along on the item's own tooltip; the gems also get
+    // their own links below, since a gem id is an item id and so resolves to a name.
+    const extra = (it.enchant ? '&ench=' + it.enchant : '')
+                + (it.gems && it.gems.length ? '&gems=' + it.gems.join(':') : '');
+    const link = whLink('item', it.id, 'Item ' + it.id, extra);
+
+    const lines = [];
+    if(it.enchant) lines.push('Enchanted');
+    else if(ENCHANTABLE.indexOf(s[0]) >= 0) lines.push('<span class="cs-noench">No enchant</span>');
+    if(it.gems && it.gems.length){
+      lines.push(it.gems.map(function(g){ return itemLink(g, 'Gem ' + g); }).join(', '));
+    }
+
+    return '<div class="cs-slot"><div class="cs-slot-label">' + esc(s[1]) + '</div>'
+         + '<div class="cs-slot-body"><div class="cs-item">' + link + '</div>'
+         + (lines.length ? '<div class="cs-extra">' + lines.join(' · ') + '</div>' : '')
+         + '</div></div>';
+  });
+
+  box.innerHTML = rows.length
+    ? '<div class="cs-gear">' + rows.join('') + '</div>'
+    : '<div class="cs-empty">The log recorded no items for this night.</div>';
+}
+
+// Slots worth calling out when they carry no enchant. Shirt/tabard/trinkets and
+// the like are never enchanted, so their absence is not news.
+const ENCHANTABLE = ['head','shoulder','back','chest','wrist','hands','legs','feet','mainhand','offhand','ranged'];
+
+/* ───────────────────────── Loot & rolls ───────────────────────── */
+function renderLoot(loot){
+  const box = document.getElementById('loot');
+  if(!loot || !loot.length){
+    box.innerHTML = '<div class="cs-empty">Nothing awarded yet.</div>';
+    return;
+  }
+  box.innerHTML = '<table class="cs-table"><thead><tr>'
+    + '<th>Item</th><th>Where</th><th class="num">Roll</th><th class="num">Beat</th><th>Date</th>'
+    + '</tr></thead><tbody>'
+    + loot.map(function(l){
+        const tags = (l.offSpec ? '<span class="cs-tag">OS</span>' : '')
+                   + (l.softReserve ? '<span class="cs-tag">SR</span>' : '')
+                   + (l.wishlist ? '<span class="cs-tag">WL</span>' : '')
+                   + (l.tmb ? '<span class="cs-tag">TMB</span>' : '');
+        return '<tr><td>' + (l.itemId ? itemLink(l.itemId, l.itemName) : esc(l.itemName)) + tags + '</td>'
+             + '<td>' + esc(l.raid || (l.awardedBy ? 'from ' + l.awardedBy : '')) + '</td>'
+             + '<td class="num">' + (l.roll == null ? '—' : esc(l.roll)) + '</td>'
+             + '<td class="num">' + (l.contested ? esc(Math.max(0, l.contested - 1)) : '—') + '</td>'
+             + '<td>' + esc(fmtDate(l.awardedAt)) + '</td></tr>';
+      }).join('')
+    + '</tbody></table>';
+}
+
+function renderRolls(rolls, s){
+  document.getElementById('rollTiles').innerHTML =
+      tile(s.rolls, 'rolls') + tile(s.wins, 'won') + tile(s.awards, 'items awarded')
+    + tile(s.winRate == null ? '—' : s.winRate + '%', 'win rate')
+    + tile(s.average == null ? '—' : s.average, 'average roll');
+
+  const box = document.getElementById('rolls');
+  if(!rolls || !rolls.length){
+    box.innerHTML = '<div class="cs-empty">No rolls recorded — those come from a Gargul import.</div>';
+    return;
+  }
+  box.innerHTML = '<table class="cs-table"><thead><tr>'
+    + '<th>Item</th><th class="num">Roll</th><th>Result</th><th>Date</th>'
+    + '</tr></thead><tbody>'
+    + rolls.map(function(r){
+        const result = r.won ? '<span class="cs-won">Won</span>'
+                     : r.disenchanted ? '<span class="cs-lost">Disenchanted</span>'
+                     : r.lostTo
+                       ? '<span class="cs-lost">Lost to </span><a href="character.html?id=' + esc(r.lostToId) + '">' + esc(r.lostTo) + '</a>'
+                       : '<span class="cs-lost">Lost</span>';
+        return '<tr><td>' + (r.itemId ? itemLink(r.itemId, r.itemName) : esc(r.itemName))
+             + (r.classification ? '<span class="cs-tag">' + esc(r.classification) + '</span>' : '') + '</td>'
+             + '<td class="num">' + esc(r.amount) + '</td>'
+             + '<td>' + result + '</td>'
+             + '<td>' + esc(fmtDate(r.rolledAt)) + '</td></tr>';
+      }).join('')
+    + '</tbody></table>';
+}
+
+function tile(value, label){
+  return '<div><b>' + esc(value) + '</b>' + esc(label) + '</div>';
+}
+
+function renderAttendance(a){
+  const box = document.getElementById('attendance');
+  if(!a || !a.raids){
+    box.innerHTML = '<div class="cs-empty">No raids imported for this character yet.</div>';
+    return;
+  }
+  box.innerHTML = '<div class="cs-tiles">' + tile(a.raids, 'raids logged') + '</div>'
+    + '<table class="cs-table"><thead><tr><th>Raid</th><th>Date</th><th>Status</th></tr></thead><tbody>'
+    + a.recent.map(function(r){
+        const title = esc(r.title || r.code || 'Raid');
+        return '<tr><td>' + (r.code
+                 ? '<a href="' + WCL_HOST + '/reports/' + esc(r.code) + '" target="_blank" rel="noopener">' + title + '</a>'
+                 : title) + '</td>'
+             + '<td>' + esc(fmtDate(r.startsAt)) + '</td>'
+             + '<td>' + esc(r.status) + '</td></tr>';
+      }).join('')
+    + '</tbody></table>';
+}
+
+/* Wowhead's widget rewrites the links it finds when it loads. Re-running it after
+   a re-render (the older-snapshot picker) is what refreshes the new links. */
+function loadWowhead(){
+  if(window.$WowheadPower && window.$WowheadPower.refreshLinks){
+    window.$WowheadPower.refreshLinks();
+    return;
+  }
+  if(document.getElementById('wh-power')) return;
+  const s = document.createElement('script');
+  s.id = 'wh-power';
+  s.src = 'https://wow.zamimg.com/js/tooltips.js';
+  document.body.appendChild(s);
+}
+
+load();
+</script>

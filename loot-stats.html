@@ -62,6 +62,10 @@
 
   .ls-none{font-size:12.5px;color:var(--text-dim);padding:4px 0 10px}
   .ls-msg{color:var(--text-dim);padding:26px 4px;font-size:13.5px}
+
+  /* Names link to the character sheet; the class colour stays the only colour. */
+  .chr-link{text-decoration:none}
+  .chr-link:hover span{text-decoration:underline}
 </style>
 
 <div class="app">
@@ -111,7 +115,9 @@ function classColor(cls){
 }
 function nameHtml(c){
   const col = classColor(c && c.cls);
-  return '<span' + (col ? ' style="color:' + col + '"' : '') + '>' + esc(c ? c.name : '?') + '</span>';
+  const inner = '<span' + (col ? ' style="color:' + col + '"' : '') + '>' + esc(c ? c.name : '?') + '</span>';
+  // Every name here is a character we hold an id for, so it links to its sheet.
+  return c && c.id ? '<a href="character.html?id=' + esc(c.id) + '" class="chr-link">' + inner + '</a>' : inner;
 }
 
 /* ───────────────────────── Aggregation ─────────────────────────
@@ -120,15 +126,16 @@ function nameHtml(c){
    name because a winner and a bidder are resolved to the same Character server
    side, so the names already agree; the key just makes the join case-proof. */
 const CHARS = new Map();
-function chr(name, cls){
+function chr(name, cls, id){
   const key = String(name || '').toLowerCase();
   let c = CHARS.get(key);
   if(!c){
-    c = { name: name, cls: cls || null, rolls:0, sum:0, wins:0, losses:0,
+    c = { name: name, cls: cls || null, id: id || null, rolls:0, sum:0, wins:0, losses:0,
           hundreds:0, ones:0, osWins:0, lostTo:new Map(), streak:0, worstStreak:0 };
     CHARS.set(key, c);
   }
   if(!c.cls && cls) c.cls = cls;
+  if(!c.id && id) c.id = id;
   return c;
 }
 
@@ -160,7 +167,7 @@ function aggregate(rows){
       (!!winRoll && String(winRoll.classification || '').toUpperCase() === 'OS');
 
     if(winnerKey){
-      const w = chr(a.character, a.characterClass || (winRoll && winRoll.cls));
+      const w = chr(a.character, a.characterClass || (winRoll && winRoll.cls), a.characterId);
       w.wins++;
       if(isOS) w.osWins++;
     }
@@ -170,7 +177,7 @@ function aggregate(rows){
     }
 
     rolls.forEach(r => {
-      const c = chr(r.player, r.cls);
+      const c = chr(r.player, r.cls, r.playerId);
       const amt = Number(r.amount);
       c.rolls++;
       if(isFinite(amt)){

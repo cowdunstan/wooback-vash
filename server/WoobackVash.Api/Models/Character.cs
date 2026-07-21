@@ -20,6 +20,17 @@ public class Character
     /// <summary>True for the member's main character; alts are false.</summary>
     public bool IsMain { get; set; }
 
+    /// <summary>
+    /// Raid role as the logs report it — "tank", "healer" or "dps".
+    /// Written by the Warcraft Logs attendance import alongside <see cref="Spec"/>;
+    /// together they are the character's "raid setup" on the character sheet.
+    /// </summary>
+    public string? Role { get; set; }
+
+    /// <summary>When a log import last refreshed <see cref="Spec"/>/<see cref="Role"/>.
+    /// Null means the setup has never been seen in a log.</summary>
+    public DateTimeOffset? SetupUpdatedAt { get; set; }
+
     public string? Notes { get; set; }
 
     /// <summary>

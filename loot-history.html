@@ -53,6 +53,9 @@
   table.lh td{padding:8px;border-bottom:1px solid rgba(31,74,63,.5);vertical-align:top;color:var(--text)}
   table.lh tr:last-child td{border-bottom:none}
   table.lh .muted{color:var(--text-dim)}
+  /* Names link to the character sheet; the class colour stays the only colour. */
+  .chr-link{text-decoration:none}
+  .chr-link:hover strong{text-decoration:underline}
   table.lh td strong{font-weight:600}
   .lh-item{font-weight:600}
   .lh-when{white-space:nowrap}
@@ -128,9 +131,11 @@ function classColor(cls){
   if(!cls) return null;
   return CLASS_COLORS[String(cls).toLowerCase().replace(/[^a-z]/g,'')] || null;
 }
-function charName(name, cls, term){
+// With an id, the name links to the character's sheet (gear, loot, rolls).
+function charName(name, cls, term, id){
   const c = classColor(cls);
-  return '<strong' + (c ? ' style="color:' + c + '"' : '') + '>' + hl(name, term) + '</strong>';
+  const inner = '<strong' + (c ? ' style="color:' + c + '"' : '') + '>' + hl(name, term) + '</strong>';
+  return id ? '<a href="character.html?id=' + esc(id) + '" class="chr-link">' + inner + '</a>' : inner;
 }
 
 // Escape first, then wrap matches — so the highlight markup is the only markup.
@@ -182,7 +187,7 @@ function rollsCell(r, term){
   // Auto-open when the search matched a bidder rather than the item or winner.
   const hit = !!term && rolls.some(x => (x.player || '').toLowerCase().includes(term));
   const items = rolls.map(x =>
-    '<li><span class="amt">' + esc(x.amount) + '</span>' + charName(x.player || '?', x.cls, term) +
+    '<li><span class="amt">' + esc(x.amount) + '</span>' + charName(x.player || '?', x.cls, term, x.playerId) +
     (x.classification ? '<span class="cl">' + esc(x.classification) + '</span>' : '') + '</li>'
   ).join('');
   return '<button class="rolls-toggle" onclick="toggleRolls(\'' + r.id + '\')">' +
@@ -216,7 +221,7 @@ function render(){
   body.innerHTML = rows.map(r => {
     const winner = r.disenchanted
       ? '<span class="pill pill-de">Disenchanted</span>'
-      : (r.character ? charName(r.character, r.characterClass, term) : '<span class="muted">—</span>');
+      : (r.character ? charName(r.character, r.characterClass, term, r.characterId) : '<span class="muted">—</span>');
     return '<tr>' +
       '<td class="lh-item">' + hl(r.itemName, term) +
         (r.note ? ' <span class="muted">— ' + hl(r.note, term) + '</span>' : '') + '</td>' +
