@@ -1,0 +1,296 @@
+<meta charset="utf-8">
+<script>
+/* Access gate. Same as loot-history.html: the item list is open to any signed-in
+   tier — /api/items/list is session-gated, this only decides whether the page
+   renders at all. */
+(function(){
+  var m = location.hash.match(/(?:^#|&)session=([^&]+)/);
+  if(m){
+    try{ localStorage.setItem('vashj_session', decodeURIComponent(m[1])); }catch(e){}
+    history.replaceState(null, '', location.pathname + location.search);
+  }
+  function valid(tok){
+    if(!tok) return false;
+    try{
+      var p = tok.split('.')[0].replace(/-/g,'+').replace(/_/g,'/');
+      while(p.length % 4) p += '=';
+      var payload = JSON.parse(atob(p));
+      return payload.exp && payload.exp > Math.floor(Date.now()/1000);
+    }catch(e){ return false; }
+  }
+  var tok = null;
+  try{ tok = localStorage.getItem('vashj_session'); }catch(e){}
+  if(!valid(tok)){
+    try{ localStorage.removeItem('vashj_session'); }catch(e){}
+    location.replace('index.html');
+  }
+})();
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+<style>
+  /* il- = item list. The search bar and table shapes come from loot-history.html,
+     which this page is the item-first counterpart of. */
+  .il-bar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:14px}
+  .il-search{
+    flex:1;min-width:240px;max-width:420px;
+    background:#0a1815;border:1px solid var(--panel-line);color:var(--text);
+    border-radius:7px;padding:9px 12px;font-size:13.5px;font-family:'Inter';
+  }
+  .il-search:focus{outline:none;border-color:var(--teal-dim)}
+  .il-count{font-size:11.5px;color:var(--text-dim)}
+  .il-panel{background:var(--panel);border:1px solid var(--panel-line);border-radius:10px;padding:6px 14px 14px;overflow-x:auto}
+  table.il{width:100%;border-collapse:collapse;font-size:13px}
+  table.il th{
+    text-align:left;color:var(--text-dim);font-weight:600;font-size:11px;
+    text-transform:uppercase;letter-spacing:.6px;padding:10px 8px;
+    border-bottom:1px solid var(--panel-line);white-space:nowrap;
+  }
+  table.il th.sortable{cursor:pointer;user-select:none}
+  table.il th.sortable:hover{color:var(--text)}
+  table.il th .arrow{color:var(--teal);font-size:9px;margin-left:3px}
+  /* Explicit colour: the page runs in quirks mode, where a <table> drops colour
+     inheritance, so plain cells would fall back to black. */
+  table.il td{padding:8px;border-bottom:1px solid rgba(31,74,63,.5);vertical-align:top;color:var(--text)}
+  table.il tr:last-child td{border-bottom:none}
+  table.il .muted{color:var(--text-dim)}
+  table.il td.num{text-align:right;padding-right:16px;font-variant-numeric:tabular-nums;white-space:nowrap}
+  .il-item{font-weight:600}
+  .il-icon{
+    width:22px;height:22px;border-radius:4px;border:1px solid var(--panel-line);
+    vertical-align:-6px;margin-right:7px;background:#0b1a17;
+  }
+  /* Names link to the character sheet; the class colour stays the only colour. */
+  .chr-link{text-decoration:none}
+  .chr-link:hover strong{text-decoration:underline}
+  table.il td strong{font-weight:600}
+  .wearers-toggle{background:none;border:none;color:var(--text-dim);cursor:pointer;font-size:12px;padding:0;font-family:'Inter';white-space:nowrap}
+  .wearers-toggle:hover{color:var(--text)}
+  .wearers{margin:6px 0 2px;padding:0;list-style:none;font-size:12px}
+  .wearers li{padding:2px 0;color:var(--text-dim)}
+  /* il-slot, not .slot: styles.css already owns .slot for the board's paperdoll
+     rings, and that rule is display:block — it would stack the label. */
+  .wearers .il-slot{font-size:10px;text-transform:uppercase;letter-spacing:.4px;opacity:.75;margin-left:6px}
+  .il-empty{color:var(--text-dim);padding:18px 8px;font-size:13px;text-align:center}
+  mark{background:rgba(46,230,171,.28);color:inherit;border-radius:2px;padding:0 1px}
+</style>
+
+<div class="app">
+  <div class="wrap">
+    <div class="authbar">
+      <span class="authbar-left">
+        <div class="nav">
+          <button class="hamburger" id="navToggle" aria-label="Menu" aria-expanded="false" aria-controls="navDrawer">
+            <span></span><span></span><span></span>
+          </button>
+          <nav class="nav-drawer" id="navDrawer"></nav>
+        </div>
+        <span class="eyebrow">Gear</span>
+      </span>
+      <span class="authbar-right">
+        <span id="authWho" class="auth-who"></span>
+        <button class="btn-ghost" onclick="logout()">Sign out</button>
+      </span>
+    </div>
+
+    <h1>Items</h1>
+    <p class="subtitle">Every item on a wooback character in their most recent imported raid night, how many wear it, and how often it has dropped. Search by item, by who has it equipped, or by class.</p>
+
+    <div class="il-bar">
+      <input class="il-search" id="q" type="search" placeholder="Search items, characters, classes…" autocomplete="off">
+      <button class="btn-ghost" onclick="clearSearch()">Clear</button>
+      <span class="il-count" id="count"></span>
+    </div>
+
+    <div class="il-panel">
+      <table class="il">
+        <thead><tr>
+          <th class="sortable" data-sort="item">Item</th>
+          <th class="sortable" data-sort="equipped">Equipped</th>
+          <th class="sortable num" data-sort="drops">Drops</th>
+          <th class="sortable num" data-sort="ilvl">Item level</th>
+        </tr></thead>
+        <tbody id="body"><tr><td colspan="4" class="il-empty">Loading…</td></tr></tbody>
+      </table>
+    </div>
+
+    <footer>wooback guild tools — read-only view of the guild gear database.</footer>
+  </div>
+</div>
+
+<script src="menu.js"></script>
+<script>
+// API_BASE and the item-link helpers (itemLink, slotLabel, loadWowhead) come from menu.js.
+
+/* This page writes its own item names — with the search term marked inside the
+   link — and Wowhead's renameLinks would replace that markup with a plain name.
+   The icon is ours too (the log records it, so it survives the widget being
+   blocked), and iconizeLinks would put a second one beside it. Tooltips and the
+   quality colour still come from the widget. */
+whTooltips.renameLinks = false;
+whTooltips.iconizeLinks = false;
+
+const ICON_HOST = 'https://wow.zamimg.com/images/wow/icons/large/';
+
+function esc(s){ return String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+// WoW class colours (Blizzard palette), shared with loot-history.html / item.html.
+const CLASS_COLORS = {
+  warrior:'#c79c6e', paladin:'#f58cba', hunter:'#abd473', rogue:'#fff569',
+  priest:'#ffffff', deathknight:'#e0475f', shaman:'#3b8de0', mage:'#69ccf0',
+  warlock:'#a99ce0', monk:'#00ff96', druid:'#ff7d0a', demonhunter:'#a330c9',
+  evoker:'#33937f'
+};
+function classColor(cls){
+  if(!cls) return null;
+  return CLASS_COLORS[String(cls).toLowerCase().replace(/[^a-z]/g,'')] || null;
+}
+// Wowhead's quality palette, for the item's own name — same list as item.html.
+const QUALITY_COLORS = ['#9d9d9d','#ffffff','#1eff00','#0070dd','#a335ee','#ff8000','#e6cc80'];
+
+// With an id, the name links to the character's sheet (gear, loot, rolls).
+function charName(name, cls, term, id){
+  const c = classColor(cls);
+  const inner = '<strong' + (c ? ' style="color:' + c + '"' : '') + '>' + hl(name, term) + '</strong>';
+  return id ? '<a href="character.html?id=' + esc(id) + '" class="chr-link">' + inner + '</a>' : inner;
+}
+
+// Escape first, then wrap matches — so the highlight markup is the only markup.
+function hl(text, term){
+  const safe = esc(text);
+  if(!term) return safe;
+  const i = safe.toLowerCase().indexOf(term.toLowerCase());
+  if(i < 0) return safe;
+  return safe.slice(0, i) + '<mark>' + safe.slice(i, i + term.length) + '</mark>' + safe.slice(i + term.length);
+}
+
+let ROWS = [];            // every item, as returned by the API
+let sortKey = 'equipped'; // current sort column
+let sortDir = -1;         // 1 ascending, -1 descending
+
+// One lower-cased haystack per row: the item, plus every wearer's name and class —
+// so searching "warlock" finds what the warlocks are wearing.
+function haystack(r){
+  return [r.name]
+    .concat((r.equipped || []).map(e => e.name))
+    .concat((r.equipped || []).map(e => e.cls))
+    .filter(Boolean).join(' ').toLowerCase();
+}
+
+function sortValue(r){
+  switch(sortKey){
+    case 'drops':    return r.drops || 0;
+    case 'ilvl':     return r.ilvl || 0;
+    case 'equipped': return (r.equipped || []).length;
+    default:         return r.name || '';
+  }
+}
+
+// Who has it on, folded away until asked for — the rolls column on the loot
+// history behaves the same way.
+function wearersCell(r, term){
+  const who = r.equipped || [];
+  if(!who.length) return '<span class="muted">—</span>';
+  // Auto-open when the search matched a wearer or their class, not the item name.
+  const hit = !!term && who.some(e =>
+    (e.name || '').toLowerCase().includes(term) || (e.cls || '').toLowerCase().includes(term));
+  const items = who.map(e =>
+    '<li>' + charName(e.name || '?', e.cls, term, e.characterId) +
+    (e.slot ? '<span class="il-slot">' + esc(slotLabel(e.slot)) + '</span>' : '') + '</li>'
+  ).join('');
+  return '<button class="wearers-toggle" onclick="toggleWearers(\'' + r.id + '\')">' +
+    who.length + ' equipped ▾</button>' +
+    '<ul class="wearers" id="wearers-' + r.id + '"' + (hit ? '' : ' style="display:none"') + '>' + items + '</ul>';
+}
+function toggleWearers(id){
+  const el = document.getElementById('wearers-' + id);
+  if(el) el.style.display = el.style.display === 'none' ? '' : 'none';
+}
+
+function render(){
+  const term = document.getElementById('q').value.trim().toLowerCase();
+  const rows = (term ? ROWS.filter(r => haystack(r).includes(term)) : ROWS.slice())
+    .sort((a, b) => {
+      const av = sortValue(a), bv = sortValue(b);
+      const cmp = typeof av === 'number' ? av - bv : String(av).localeCompare(String(bv));
+      return cmp * sortDir;
+    });
+
+  document.getElementById('count').textContent = term
+    ? rows.length + ' of ' + ROWS.length + ' items'
+    : ROWS.length + ' item' + (ROWS.length === 1 ? '' : 's') + ' equipped';
+
+  const body = document.getElementById('body');
+  if(!rows.length){
+    body.innerHTML = '<tr><td colspan="4" class="il-empty">' +
+      (ROWS.length ? 'Nothing matches “' + esc(term) + '”.'
+                   : 'No gear has been imported yet — gear is read from a Warcraft Logs report ' +
+                     'when an officer imports its attendance.') + '</td></tr>';
+    return;
+  }
+  body.innerHTML = rows.map(r => {
+    const col = r.quality != null ? QUALITY_COLORS[r.quality] : null;
+    const icon = r.icon ? '<img class="il-icon" src="' + ICON_HOST + esc(r.icon) + '.jpg" alt="">' : '';
+    // The search highlight is already-escaped markup, so it rides inside the link.
+    const name = '<span' + (col ? ' style="color:' + col + '"' : '') + '>' +
+      itemLink(r.id, r.name, '', hl(r.name, term)) + '</span>';
+    return '<tr>' +
+      '<td class="il-item">' + icon + name + '</td>' +
+      '<td>' + wearersCell(r, term) + '</td>' +
+      '<td class="muted num">' + (r.drops || 0) + '</td>' +
+      '<td class="muted num">' + (r.ilvl ? Math.round(r.ilvl) : '—') + '</td>' +
+    '</tr>';
+  }).join('');
+  // New links each render, so the tooltip widget has to look again.
+  loadWowhead();
+}
+
+function markSortHeaders(){
+  document.querySelectorAll('th.sortable').forEach(th => {
+    const on = th.dataset.sort === sortKey;
+    th.innerHTML = th.textContent.replace(/\s*[▲▼]$/, '') + (on ? ' <span class="arrow">' + (sortDir > 0 ? '▲' : '▼') + '</span>' : '');
+  });
+}
+
+function clearSearch(){
+  const q = document.getElementById('q');
+  q.value = '';
+  q.focus();
+  render();
+}
+
+async function load(){
+  try{
+    const res = await fetch(API_BASE + '/api/items/list', { headers:{ 'Authorization':'Bearer ' + sessionToken() } });
+    if(res.status === 401){
+      document.getElementById('body').innerHTML = '<tr><td colspan="4" class="il-empty">Session expired — signing out…</td></tr>';
+      setTimeout(logout, 1200);
+      return;
+    }
+    if(!res.ok){
+      document.getElementById('body').innerHTML = '<tr><td colspan="4" class="il-empty">Could not load items (HTTP ' + res.status + ').</td></tr>';
+      return;
+    }
+    ROWS = await res.json();
+    render();
+  }catch(err){
+    document.getElementById('body').innerHTML = '<tr><td colspan="4" class="il-empty">Could not reach the guild database.</td></tr>';
+  }
+}
+
+document.getElementById('q').addEventListener('input', render);
+document.querySelectorAll('th.sortable').forEach(th => {
+  th.addEventListener('click', () => {
+    const key = th.dataset.sort;
+    // Re-clicking a column flips it; a new column starts descending for the counts
+    // (most worn / most dropped first) and ascending for the item name.
+    if(sortKey === key) sortDir = -sortDir;
+    else { sortKey = key; sortDir = key === 'item' ? 1 : -1; }
+    markSortHeaders();
+    render();
+  });
+});
+markSortHeaders();
+load();
+</script>

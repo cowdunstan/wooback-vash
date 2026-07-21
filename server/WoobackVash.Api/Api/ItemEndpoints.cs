@@ -119,7 +119,109 @@ public static class ItemEndpoints
 
             return Results.Json(new { item, drops = awards.Count, awards, equipped });
         });
+
+        // Every item the guild is currently wearing (items.html). The inverse of the
+        // route above: that one starts from an item, this one lists them all, with
+        // who has each equipped and how often it has dropped.
+        app.MapGet("/api/items/list", async (HttpContext ctx, SessionTokenService tokens) =>
+        {
+            var (_, error) = ctx.RequireSession(tokens);
+            if (error is not null) return error;
+            var db = ctx.RequestServices.GetService<AppDbContext>();
+            if (db is null) return DbUnavailable();
+
+            var snapshots = await LatestSnapshots(db).ToListAsync();
+
+            // Keyed by item id. Gems are skipped: the log carries them as bare ids
+            // with no name, so they would list as "Item 32211" and never match a
+            // search. Slot entries repeat when someone swapped mid-night, so each
+            // character counts once per item.
+            var items = new Dictionary<long, ItemRow>();
+            foreach (var s in snapshots)
+            {
+                var seen = new HashSet<long>();
+                foreach (var entry in ParseItems(s.Items).EnumerateArray())
+                {
+                    if (entry.ValueKind != JsonValueKind.Object) continue;
+                    var id = (long?)Num(entry, "id");
+                    if (id is null or <= 0 || !seen.Add(id.Value)) continue;
+
+                    if (!items.TryGetValue(id.Value, out var row))
+                        items[id.Value] = row = new ItemRow();
+                    // A snapshot may omit any of these, so keep the first one that has it.
+                    row.Name ??= Str(entry, "name");
+                    row.Icon ??= Icon(Str(entry, "icon"));
+                    row.Quality ??= Num(entry, "quality");
+                    row.Ilvl ??= Num(entry, "ilvl");
+
+                    var c = s.Character!;
+                    row.Equipped.Add((c.Name, new
+                    {
+                        characterId = c.Id,
+                        name = c.Name,
+                        cls = c.Class,
+                        isMain = c.IsMain,
+                        member = c.Member is null ? null : c.Member.Nickname ?? c.Member.DisplayName ?? c.Member.DiscordUsername,
+                        slot = Str(entry, "slot")
+                    }));
+                }
+            }
+
+            // Drop counts, matched the same way the single-item route matches: by id,
+            // plus the hand-typed rows that carry only a name. Ignored characters are
+            // out of the guild, so their awards are excluded as they are everywhere else.
+            var awarded = await db.LootAwards.AsNoTracking()
+                .Where(l => l.Character == null || !l.Character.Ignored)
+                .Select(l => new { l.ItemId, l.ItemName })
+                .ToListAsync();
+            var byId = awarded.Where(a => a.ItemId != null)
+                .GroupBy(a => a.ItemId!.Value)
+                .ToDictionary(g => g.Key, g => g.Count());
+            var byName = awarded.Where(a => a.ItemId == null)
+                .GroupBy(a => a.ItemName.ToLowerInvariant())
+                .ToDictionary(g => g.Key, g => g.Count());
+
+            var rows = items.Select(kv => new
+            {
+                id = kv.Key,
+                name = kv.Value.Name ?? $"Item {kv.Key}",
+                icon = kv.Value.Icon,
+                quality = kv.Value.Quality,
+                ilvl = kv.Value.Ilvl,
+                drops = (byId.TryGetValue(kv.Key, out var n) ? n : 0)
+                        + (kv.Value.Name is not null && byName.TryGetValue(kv.Value.Name.ToLowerInvariant(), out var m) ? m : 0),
+                equipped = kv.Value.Equipped
+                    .OrderBy(e => e.Name, StringComparer.OrdinalIgnoreCase)
+                    .Select(e => e.Row)
+                    .ToList()
+            })
+            .OrderBy(r => r.name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+            return Results.Json(rows);
+        });
     }
+
+    /// <summary>One item as it is assembled across every character wearing it.</summary>
+    private sealed class ItemRow
+    {
+        public string? Name;
+        public string? Icon;
+        public double? Quality;
+        public double? Ilvl;
+        public List<(string Name, object Row)> Equipped = new();
+    }
+
+    /// <summary>
+    /// The most recent gear snapshot of every guild character — the one definition of
+    /// "what people are wearing", shared by the item page and the item list.
+    /// </summary>
+    private static IQueryable<CharacterGearSnapshot> LatestSnapshots(AppDbContext db) =>
+        db.GearSnapshots.AsNoTracking()
+            .Include(s => s.Character!).ThenInclude(c => c.Member)
+            .Where(s => s.Character != null && !s.Character.Ignored)
+            // The latest snapshot per character: none newer exists for the same one.
+            .Where(s => !db.GearSnapshots.Any(o => o.CharacterId == s.CharacterId && o.RecordedAt > s.RecordedAt));
 
     /// <summary>
     /// Who is wearing the item now: each character's most recent gear snapshot only.
@@ -130,12 +232,7 @@ public static class ItemEndpoints
     /// </summary>
     private static async Task<(List<object> Equipped, JsonElement? Item)> Equipped(AppDbContext db, long itemId)
     {
-        var snapshots = await db.GearSnapshots.AsNoTracking()
-            .Include(s => s.Character!).ThenInclude(c => c.Member)
-            .Where(s => s.Character != null && !s.Character.Ignored)
-            // The latest snapshot per character: none newer exists for the same one.
-            .Where(s => !db.GearSnapshots.Any(o => o.CharacterId == s.CharacterId && o.RecordedAt > s.RecordedAt))
-            .ToListAsync();
+        var snapshots = await LatestSnapshots(db).ToListAsync();
 
         var rows = new List<(string Name, object Row)>();
         JsonElement? found = null;
