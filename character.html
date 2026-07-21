@@ -165,14 +165,9 @@
 
 <script src="menu.js"></script>
 <script>
-// API_BASE (the shared .NET backend host) is provided by menu.js.
-
-/* The log names items and enchants itself; Wowhead supplies the hover tooltips and
-   the gem names (gems come through as bare ids). Point this at the expansion the
-   Anniversary realms are on: 'classic' (vanilla), 'tbc', 'wotlk'. One line to
-   flip when the guild progresses. */
-const WOWHEAD_DOMAIN = 'tbc';
-var whTooltips = { colorLinks:true, iconizeLinks:true, renameLinks:true };
+// API_BASE and the item-link helpers (itemLink, loadWowhead) come from menu.js.
+// The log names items and enchants itself; Wowhead supplies the hover tooltips
+// and the gem names (gems come through as bare ids).
 
 const WCL_HOST = 'https://fresh.warcraftlogs.com';
 
@@ -201,17 +196,6 @@ function cap(s){
   const t = String(s);
   return t.toLowerCase() === 'dps' ? 'DPS' : t.charAt(0).toUpperCase() + t.slice(1);
 }
-
-/* A Wowhead link. `text` is a placeholder — with renameLinks the widget swaps in
-   the real name (and its quality colour); if the widget is blocked, the
-   placeholder is what the reader sees, so it must stand on its own. */
-function whLink(kind, id, text, extra){
-  if(!id) return esc(text || '');
-  const data = kind + '=' + id + (extra || '');
-  return '<a href="https://www.wowhead.com/' + WOWHEAD_DOMAIN + '/' + kind + '=' + id + '"'
-       + ' data-wowhead="' + esc(data) + '" target="_blank" rel="noopener">' + esc(text || (kind + ' ' + id)) + '</a>';
-}
-function itemLink(id, name){ return whLink('item', id, name || ('Item ' + id)); }
 
 /* ───────────────────────── Load ───────────────────────── */
 const params = new URLSearchParams(location.search);
@@ -284,15 +268,8 @@ function renderHead(c){
 }
 
 /* ───────────────────────── Gear ─────────────────────────
-   Paperdoll order, so the list reads like the in-game character pane. Slots the
-   snapshot has nothing for are simply left out. */
-const SLOT_ORDER = [
-  ['head','Head'], ['neck','Neck'], ['shoulder','Shoulder'], ['back','Back'],
-  ['chest','Chest'], ['shirt','Shirt'], ['tabard','Tabard'], ['wrist','Wrist'],
-  ['hands','Hands'], ['waist','Waist'], ['legs','Legs'], ['feet','Feet'],
-  ['finger1','Ring 1'], ['finger2','Ring 2'], ['trinket1','Trinket 1'], ['trinket2','Trinket 2'],
-  ['mainhand','Main hand'], ['offhand','Off hand'], ['ranged','Ranged']
-];
+   SLOT_ORDER (menu.js) is paperdoll order, so the list reads like the in-game
+   character pane. Slots the snapshot has nothing for are simply left out. */
 
 function renderGear(gear, history){
   const picker = document.getElementById('gearPicker');
@@ -351,7 +328,7 @@ function renderGear(gear, history){
     // their own links below, since a gem id is an item id and so resolves to a name.
     const extra = (it.enchant ? '&ench=' + it.enchant : '')
                 + (it.gems && it.gems.length ? '&gems=' + it.gems.join(':') : '');
-    const link = whLink('item', it.id, it.name || ('Item ' + it.id), extra);
+    const link = itemLink(it.id, it.name || ('Item ' + it.id), extra);
 
     // The log names the enchant for us — an enchant id is not a spell id, so this
     // text exists nowhere else.
@@ -365,7 +342,7 @@ function renderGear(gear, history){
     }
     if(worn.length > 1){
       lines.push('<span class="cs-swap">also worn: '
-        + worn.slice(1).map(function(w){ return whLink('item', w.id, w.name || ('Item ' + w.id), ''); }).join(', ')
+        + worn.slice(1).map(function(w){ return itemLink(w.id, w.name || ('Item ' + w.id)); }).join(', ')
         + '</span>');
     }
 
@@ -465,19 +442,7 @@ function renderAttendance(a){
     + '</tbody></table>';
 }
 
-/* Wowhead's widget rewrites the links it finds when it loads. Re-running it after
-   a re-render (the older-snapshot picker) is what refreshes the new links. */
-function loadWowhead(){
-  if(window.$WowheadPower && window.$WowheadPower.refreshLinks){
-    window.$WowheadPower.refreshLinks();
-    return;
-  }
-  if(document.getElementById('wh-power')) return;
-  const s = document.createElement('script');
-  s.id = 'wh-power';
-  s.src = 'https://wow.zamimg.com/js/tooltips.js';
-  document.body.appendChild(s);
-}
-
+// loadWowhead() lives in menu.js — re-running it after a re-render (the
+// older-snapshot picker) is what attaches tooltips to the new links.
 load();
 </script>

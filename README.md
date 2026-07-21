@@ -49,16 +49,23 @@ board, identity links, loot, and attendance.
   item and spells out its enchant ("+7 Spell Power and +4 Critical Strike") —
   that text exists nowhere else, since an enchant id is not a spell id — while
   **gems** arrive as bare item ids and are named by **Wowhead**, which also
-  supplies every hover tooltip. `WOWHEAD_DOMAIN` at the top of the page selects
-  the expansion (`classic`, `tbc`, …) and is the one line to change as the guild
-  progresses. A slot can list more than one item: `playerDetails` covers the whole
+  supplies every hover tooltip. `WOWHEAD_DOMAIN` in `menu.js` selects the
+  expansion (`classic`, `tbc`, …) and is the one line to change as the guild
+  progresses. Item names link to `item.html`, not out to Wowhead. A slot can list more than one item: `playerDetails` covers the whole
   night, so a mid-raid swap shows up as "also worn".
+- **`item.html`** — the **item page**, open to any signed-in tier: which guild
+  characters have the item equipped in their latest logged raid (a gem matches the
+  piece it is socketed into), how many times it has dropped, who it was awarded to
+  and every roll on it, plus its icon, hover tooltip and a Wowhead link. Every item
+  name on the site links here — the loot log, loot history, loot stats, and each
+  item, gem and "also worn" entry on a character sheet.
 - **`sheet.html`** — a read-only `<iframe>` of the guild's loot / BIS sheet
   (`SHEET_EMBED_URL`), open to any signed-in tier. Reads the live sheet via its
   "anyone with the link" share setting, so the sign-in gate here is for the app's
   flow, not a data barrier.
-- **`menu.js`** — shared session helpers, the `API_BASE` constant, and the
-  hamburger menu, used by every page.
+- **`menu.js`** — shared session helpers, the `API_BASE` constant, the hamburger
+  menu, and the item-link helpers (`itemLink`, `loadWowhead`, `SLOT_ORDER`,
+  `WOWHEAD_DOMAIN`) every page renders items with.
 
 ### Asset caching
 
@@ -111,6 +118,10 @@ A .NET 8 Minimal-API app (EF Core + Npgsql). Routes:
   its alts, the newest gear snapshot with the list of earlier ones, its loot,
   rolls and attendance; `GET /api/characters/sheet/history?id=&code=` returns one
   earlier snapshot.
+- **Item page** (any signed-in session) — `GET /api/items?id=` or `?name=` returns
+  the item (name, icon, quality, item level), who has it equipped in their latest
+  gear snapshot, how often it dropped, and every award with its rolls. An id also
+  picks up hand-typed awards that carry only the name, so both reach one page.
 - **Health** — `/healthz` (liveness), `/readyz` (DB reachability + error detail).
 
 Non-secret config (Discord client id, guild id, role ids, WCL guild identity)

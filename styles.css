@@ -221,6 +221,13 @@
   .nav-drawer a:hover{background:#132824;color:#eafff6;}
   .nav-drawer a.active{color:var(--teal);}
 
+  /* Item links (menu.js itemLink) — every item name across the site points at
+     item.html. Nothing sets a global anchor colour and the pages run in quirks
+     mode, so an unstyled one lands on the browser's default blue; Wowhead's
+     quality colours sit on an inner span and still win. */
+  .item-link{color:inherit;text-decoration:none;}
+  .item-link:hover{color:var(--teal);text-decoration:underline;}
+
   /* Home / welcome hub */
   .home-hero{margin:6px 0 26px;}
   .home-hero h1{font-size:30px;margin-bottom:4px;}

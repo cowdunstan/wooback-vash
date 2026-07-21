@@ -170,13 +170,14 @@ function renderLoot(rows){
     const winner = r.disenchanted
       ? '<span class="pill pill-de">Disenchanted</span>'
       : (r.character ? charName(r.character, r.characterClass) : '<span class="muted">—</span>');
-    return '<tr><td>'+esc(r.itemName)+(r.note?' <span class="muted">— '+esc(r.note)+'</span>':'')+'</td>'+
+    return '<tr><td>'+itemLink(r.itemId, r.itemName)+(r.note?' <span class="muted">— '+esc(r.note)+'</span>':'')+'</td>'+
     '<td>'+winner+'</td>'+
     '<td class="muted">'+esc(fmtWhen(r.awardedAt))+'</td>'+
     '<td class="muted">'+(r.awardedBy?esc(r.awardedBy):'—')+'</td>'+
     '<td>'+bidsCell(r.rolls, r.id)+'</td>'+
     '<td style="text-align:right;"><button class="rl-del" title="Delete" onclick="delLoot(\''+r.id+'\')">✕</button></td></tr>';
   }).join('');
+  loadWowhead(); // new item links each render
 }
 
 async function loadAll(){

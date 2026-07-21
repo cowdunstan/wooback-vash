@@ -50,6 +50,69 @@ const API_BASE = (location.hostname === 'localhost' || location.hostname === '12
   ? 'http://localhost:8080'
   : 'https://wooback-vash-api.fly.dev';
 
+/* ───────────────────────── Shared item links ─────────────────────────
+   Every item name on the site points at item.html — who has it equipped, how often
+   it has dropped, and every roll on it. Wowhead still supplies the hover tooltip:
+   the widget keys off `data-wowhead`, not the href, so an internal link tooltips
+   exactly like an external one.
+
+   WOWHEAD_DOMAIN is the expansion the Anniversary realms are on: 'classic'
+   (vanilla), 'tbc', 'wotlk'. One line to flip when the guild progresses. */
+const WOWHEAD_DOMAIN = 'tbc';
+var whTooltips = { colorLinks:true, iconizeLinks:true, renameLinks:true };
+
+function whEsc(s){ return String(s == null ? '' : s).replace(/[&<>"]/g, function(c){
+  return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+
+/* An item's page on this site. Awards typed by hand carry no id, so those fall
+   back to the name — the API resolves either. */
+function itemHref(id, name){
+  return id ? 'item.html?id=' + encodeURIComponent(id)
+            : 'item.html?name=' + encodeURIComponent(name || '');
+}
+
+/* An item link. `html` is already-escaped markup when given (the loot history
+   passes its search highlight through), otherwise `name` is escaped here. `extra`
+   is the gear list's `&ench=…&gems=…` suffix, which rides along on the tooltip. */
+function itemLink(id, name, extra, html){
+  const inner = html != null ? html : whEsc(name || (id ? 'Item ' + id : ''));
+  const tip = id ? ' data-wowhead="' + whEsc('item=' + id + (extra || '')) + '"' : '';
+  if(!id && !name) return inner;
+  return '<a href="' + whEsc(itemHref(id, name)) + '"' + tip + ' class="item-link">' + inner + '</a>';
+}
+
+/* Paperdoll slot order and labels, as the gear snapshots key them. The character
+   sheet reads the whole list (it lays gear out in paperdoll order); the item page
+   only needs one label. */
+const SLOT_ORDER = [
+  ['head','Head'], ['neck','Neck'], ['shoulder','Shoulder'], ['back','Back'],
+  ['chest','Chest'], ['shirt','Shirt'], ['tabard','Tabard'], ['wrist','Wrist'],
+  ['hands','Hands'], ['waist','Waist'], ['legs','Legs'], ['feet','Feet'],
+  ['finger1','Ring 1'], ['finger2','Ring 2'], ['trinket1','Trinket 1'], ['trinket2','Trinket 2'],
+  ['mainhand','Main hand'], ['offhand','Off hand'], ['ranged','Ranged']
+];
+function slotLabel(key){
+  for(let i = 0; i < SLOT_ORDER.length; i++) if(SLOT_ORDER[i][0] === key) return SLOT_ORDER[i][1];
+  return key || '';
+}
+
+/* The item on Wowhead itself — only the item page links out. */
+function wowheadHref(id){ return 'https://www.wowhead.com/' + WOWHEAD_DOMAIN + '/item=' + id; }
+
+/* Wowhead's widget rewrites the links it finds when it loads. Re-running it after
+   a re-render is what attaches tooltips to the new links. */
+function loadWowhead(){
+  if(window.$WowheadPower && window.$WowheadPower.refreshLinks){
+    window.$WowheadPower.refreshLinks();
+    return;
+  }
+  if(document.getElementById('wh-power')) return;
+  const s = document.createElement('script');
+  s.id = 'wh-power';
+  s.src = 'https://wow.zamimg.com/js/tooltips.js';
+  document.body.appendChild(s);
+}
+
 /* ───────────────────────── Shared nav links ─────────────────────────
    The one source of truth for the hamburger drawer, rendered on every page by
    renderNav() below. Officer-only links carry `officer:true` and are hidden for

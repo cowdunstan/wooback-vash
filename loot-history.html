@@ -117,7 +117,13 @@
 
 <script src="menu.js"></script>
 <script>
-// API_BASE (the shared .NET backend host) is provided by menu.js.
+// API_BASE and the item-link helpers (itemLink, loadWowhead) are provided by menu.js.
+
+/* This page writes its own item names — with the search term marked inside the
+   link — and Wowhead's renameLinks would replace that markup with a plain name.
+   Tooltips, the quality colour and the icon all still apply. */
+whTooltips.renameLinks = false;
+
 function esc(s){ return String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 
 // WoW class colours (Blizzard palette), shared with loot.html / attendance.html.
@@ -223,7 +229,8 @@ function render(){
       ? '<span class="pill pill-de">Disenchanted</span>'
       : (r.character ? charName(r.character, r.characterClass, term, r.characterId) : '<span class="muted">—</span>');
     return '<tr>' +
-      '<td class="lh-item">' + hl(r.itemName, term) +
+      // The search highlight is already-escaped markup, so it rides inside the link.
+      '<td class="lh-item">' + itemLink(r.itemId, r.itemName, '', hl(r.itemName, term)) +
         (r.note ? ' <span class="muted">— ' + hl(r.note, term) + '</span>' : '') + '</td>' +
       '<td>' + winner + '</td>' +
       '<td class="muted lh-when">' + esc(fmtWhen(r.awardedAt)) + '</td>' +
@@ -231,6 +238,8 @@ function render(){
       '<td>' + rollsCell(r, term) + '</td>' +
     '</tr>';
   }).join('');
+  // New links each render, so the tooltip widget has to look again.
+  loadWowhead();
 }
 
 function markSortHeaders(){
