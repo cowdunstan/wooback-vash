@@ -97,6 +97,10 @@ public static class CharacterSheetEndpoints
                         ? null
                         : r.LootAward!.Character!.Name,
                     lostToId = r.LootAward!.CharacterId == c.Id ? null : r.LootAward!.CharacterId,
+                    // Class of whoever took it, so the sheet can colour their name.
+                    lostToClass = r.LootAward!.CharacterId == c.Id || r.LootAward!.Character == null
+                        ? null
+                        : r.LootAward!.Character!.Class,
                     disenchanted = r.LootAward!.Disenchanted
                 })
                 .ToListAsync();

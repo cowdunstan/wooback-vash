@@ -39,7 +39,9 @@
   .rl-form select{background:#0a1815;border:1px solid var(--panel-line,#1e332d);color:var(--text,#dfeee9);border-radius:6px;padding:7px 9px;font-size:13px;font-family:'Inter';min-width:300px;max-width:100%}
   table.rl{width:100%;border-collapse:collapse;font-size:13px}
   table.rl th{text-align:left;color:var(--text-dim,#7f9a92);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.6px;padding:6px 10px;border-bottom:1px solid var(--panel-line,#1e332d)}
-  table.rl td{padding:8px 10px;border-bottom:1px solid rgba(30,51,45,.5)}
+  /* Explicit colour: the page runs in quirks mode, where a <table> drops colour
+     inheritance, so plain cells would fall back to black. */
+  table.rl td{padding:8px 10px;border-bottom:1px solid rgba(30,51,45,.5);color:var(--text)}
   table.rl tr:last-child td{border-bottom:none}
   table.rl .muted{color:var(--text-dim,#7f9a92)}
   table.rl td strong{font-weight:600}
