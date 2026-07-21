@@ -172,7 +172,7 @@ public static class RaidLogEndpoints
 
             int imported = 0, skipped = 0, disenchants = 0, rollsRecorded = 0;
             var newCharacters = 0;
-            // Cache resolved characters within this import so repeat bidders/winners
+            // Cache resolved characters within this import so repeat rollers/winners
             // don't each hit the DB (and to avoid double-adding a brand-new one).
             var charCache = new Dictionary<string, Character>(StringComparer.OrdinalIgnoreCase);
 
@@ -190,7 +190,7 @@ public static class RaidLogEndpoints
                 if (!isDe && !string.IsNullOrWhiteSpace(a.AwardedTo))
                 {
                     var (name, realm) = SplitNameRealm(a.AwardedTo!);
-                    (winner, var wasNew) = await ResolveBidder(db, charCache, name, realm, ClassName(a.WinnerClass));
+                    (winner, var wasNew) = await ResolveRoller(db, charCache, name, realm, ClassName(a.WinnerClass));
                     if (wasNew) newCharacters++;
                 }
                 else if (isDe)
@@ -220,11 +220,11 @@ public static class RaidLogEndpoints
                 foreach (var r in a.Rolls ?? Enumerable.Empty<GargulRoll>())
                 {
                     if (string.IsNullOrWhiteSpace(r.Player)) continue;
-                    var (bidder, bidderNew) = await ResolveBidder(db, charCache, r.Player!, null, r.Class);
-                    if (bidderNew) newCharacters++;
+                    var (roller, rollerNew) = await ResolveRoller(db, charCache, r.Player!, null, r.Class);
+                    if (rollerNew) newCharacters++;
                     award.Rolls.Add(new LootRoll
                     {
-                        Character = bidder,
+                        Character = roller,
                         Amount = r.Amount,
                         Classification = NullIfBlank(r.Classification),
                         Priority = r.Priority,
@@ -382,9 +382,9 @@ public static class RaidLogEndpoints
 
     private static string? NullIfBlank(string? s) => string.IsNullOrWhiteSpace(s) ? null : s;
 
-    // Find-or-create a character for a Gargul import (winner or bidder), caching by
+    // Find-or-create a character for a Gargul import (winner or roller), caching by
     // name within the import and backfilling realm/class when we learn them.
-    private static async Task<(Character Character, bool WasNew)> ResolveBidder(
+    private static async Task<(Character Character, bool WasNew)> ResolveRoller(
         AppDbContext db, Dictionary<string, Character> cache, string name, string? realm, string? cls)
     {
         var n = name.Trim();

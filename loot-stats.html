@@ -137,8 +137,13 @@ let TOTALS = { awards:0, rolls:0, de:0 };
 let LUCKIEST = null, CONTESTED = null;
 
 function aggregate(rows){
+  // An award with no rolls was handed out, not won — a master-loot assignment, a
+  // trade, an export from before Gargul recorded bids. Counting it would hand the
+  // winner a free win nobody had the chance to lose, so it sits out of every stat.
   // Oldest first: losing streaks only mean something in chronological order.
-  const awards = rows.slice().sort((a,b) => new Date(a.awardedAt) - new Date(b.awardedAt));
+  const awards = rows
+    .filter(a => (a.rolls || []).length > 0)
+    .sort((a,b) => new Date(a.awardedAt) - new Date(b.awardedAt));
 
   awards.forEach(a => {
     TOTALS.awards++;
@@ -317,7 +322,7 @@ function recordCards(){
 function summaryHtml(){
   const rollers = [...CHARS.values()].filter(c => c.rolls > 0).length;
   return [
-    ['Items awarded', TOTALS.awards],
+    ['Items rolled for', TOTALS.awards],
     ['Rolls placed', TOTALS.rolls],
     ['Characters rolling', rollers],
     ['Disenchanted', TOTALS.de]
