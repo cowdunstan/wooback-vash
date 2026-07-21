@@ -176,17 +176,26 @@ function fmtWhen(iso){ try{ const d = new Date(iso); return isNaN(d) ? '' : d.to
 
 // In-memory copies, so we can build member dropdowns and reassign without re-fetching.
 let MEMBERS = [];
+// The same members, ordered by the label the dropdowns show. Kept apart from
+// MEMBERS so the cards keep the order the API sent them in.
+let MEMBER_OPTIONS = [];
 let ORPHANS = [];
 let IGNORED = [];
 
-// Build a <select> of members with one preselected (or "— none —").
+// The name a member is known by here: their server nickname when they have one,
+// which is why the API's DisplayName ordering isn't the order officers read.
+function memberLabel(m){
+  return m.nickname || m.displayName || m.discordUsername || '(unknown)';
+}
+
+// Build a <select> of members with one preselected (or "— none —"). Sorted A→Z on
+// the label shown, so scanning a list this long is possible; see MEMBER_OPTIONS.
 function memberSelect(selectedId, onchange){
   let html = '<select onchange="' + onchange + '">';
   html += '<option value="">— unassigned —</option>';
-  for(const m of MEMBERS){
+  for(const m of MEMBER_OPTIONS){
     const sel = m.id === selectedId ? ' selected' : '';
-    const label = m.nickname || m.displayName || m.discordUsername || m.id;
-    html += '<option value="' + esc(m.id) + '"' + sel + '>' + esc(label) + '</option>';
+    html += '<option value="' + esc(m.id) + '"' + sel + '>' + esc(memberLabel(m)) + '</option>';
   }
   return html + '</select>';
 }
@@ -209,10 +218,12 @@ function guildBadge(c){
 
 function renderMembers(members){
   MEMBERS = members;
+  MEMBER_OPTIONS = members.slice()
+    .sort((a, b) => memberLabel(a).localeCompare(memberLabel(b), undefined, { sensitivity:'base' }));
   const root = document.getElementById('members');
   if(!members.length){ root.innerHTML = '<div class="rl-card"><p class="rl-empty">No members yet. Members are created automatically when someone signs in.</p></div>'; return; }
   root.innerHTML = members.map(m => {
-    const label = esc(m.nickname || m.displayName || m.discordUsername || '(unknown)');
+    const label = esc(memberLabel(m));
     const user = m.discordUsername ? '@' + esc(m.discordUsername) : '';
     const seen = m.lastSeenAt ? 'Last seen ' + esc(fmtWhen(m.lastSeenAt)) : '';
     let rows;
