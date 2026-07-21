@@ -6,6 +6,7 @@ using WoobackVash.Api.Auth;
 using WoobackVash.Api.Config;
 using WoobackVash.Api.Data;
 using WoobackVash.Api.Models;
+using WoobackVash.Api.Services;
 
 namespace WoobackVash.Api.Api;
 
@@ -23,7 +24,8 @@ public static class MembersEndpoints
         string? Spec,
         string? Realm,
         bool? IsMain,
-        string? Notes);
+        string? Notes,
+        bool? Ignored);
 
     // Shape of a guild-member object from GET /guilds/{id}/members.
     private record DiscordUser(
@@ -56,9 +58,17 @@ public static class MembersEndpoints
                     displayName = m.DisplayName,
                     nickname = m.Nickname,
                     lastSeenAt = m.LastSeenAt,
+                    // Ignored characters are hidden here and listed on their own at the
+                    // bottom of the members page (GET /api/characters?ignored=true).
                     characters = m.Characters
+                        .Where(c => !c.Ignored)
                         .OrderByDescending(c => c.IsMain).ThenBy(c => c.Name)
-                        .Select(c => new { id = c.Id, name = c.Name, cls = c.Class, spec = c.Spec, realm = c.Realm, isMain = c.IsMain, notes = c.Notes })
+                        .Select(c => new
+                        {
+                            id = c.Id, name = c.Name, cls = c.Class, spec = c.Spec, realm = c.Realm,
+                            isMain = c.IsMain, notes = c.Notes, ignored = c.Ignored,
+                            guildName = c.GuildName, guildRank = c.GuildRank, guildSyncedAt = c.GuildSyncedAt
+                        })
                 })
                 .ToListAsync();
             return Results.Json(members);
@@ -178,6 +188,9 @@ public static class MembersEndpoints
         // Characters not yet linked to a member. Loot/attendance auto-creates these
         // by name (memberId = null); officers claim them onto a member from the UI.
         // Pass ?linked=false (default) for orphans; ?linked=true lists claimed ones.
+        // ?ignored=true instead returns every ignored character, linked or not — that's
+        // the "Ignored characters" section at the bottom of the members page — and the
+        // linked filter does not apply. Otherwise ignored characters are left out.
         chars.MapGet("", async (HttpContext ctx, SessionTokenService tokens) =>
         {
             var (_, error) = ctx.RequireOfficer(tokens);
@@ -185,14 +198,84 @@ public static class MembersEndpoints
             var db = ctx.RequestServices.GetService<AppDbContext>();
             if (db is null) return DbUnavailable();
 
-            var linkedRaw = ctx.Request.Query["linked"].ToString();
-            var linked = linkedRaw.Equals("true", StringComparison.OrdinalIgnoreCase);
+            var linked = ctx.Request.Query["linked"].ToString().Equals("true", StringComparison.OrdinalIgnoreCase);
+            var ignored = ctx.Request.Query["ignored"].ToString().Equals("true", StringComparison.OrdinalIgnoreCase);
 
             var q = db.Characters.AsNoTracking()
-                .Where(c => linked ? c.MemberId != null : c.MemberId == null)
+                .Where(c => ignored
+                    ? c.Ignored
+                    : !c.Ignored && (linked ? c.MemberId != null : c.MemberId == null))
                 .OrderBy(c => c.Name)
-                .Select(c => new { id = c.Id, memberId = c.MemberId, name = c.Name, cls = c.Class, spec = c.Spec, realm = c.Realm, isMain = c.IsMain, notes = c.Notes });
+                .Select(c => new
+                {
+                    id = c.Id, memberId = c.MemberId, name = c.Name, cls = c.Class, spec = c.Spec,
+                    realm = c.Realm, isMain = c.IsMain, notes = c.Notes, ignored = c.Ignored,
+                    guildName = c.GuildName, guildRank = c.GuildRank, guildSyncedAt = c.GuildSyncedAt,
+                    // Where an ignored character came from, so the bottom section can say so.
+                    member = c.Member != null
+                        ? (c.Member.Nickname ?? c.Member.DisplayName ?? c.Member.DiscordUsername)
+                        : null
+                });
             return Results.Json(await q.ToListAsync());
+        });
+
+        // Pull the Blizzard guild roster and record, per character, whether it is
+        // currently in the guild (plus its rank). A character missing from the roster
+        // has its guild cleared — that's the signal officers use to decide what to
+        // ignore. The sync never creates, deletes, or ignores anything by itself.
+        chars.MapPost("/sync-guild", async (
+            HttpContext ctx,
+            SessionTokenService tokens,
+            BlizzardService blizzard,
+            IOptions<BlizzardOptions> opt) =>
+        {
+            var (_, error) = ctx.RequireOfficer(tokens);
+            if (error is not null) return error;
+            var db = ctx.RequestServices.GetService<AppDbContext>();
+            if (db is null) return DbUnavailable();
+
+            // Officers press this to see the roster as it is right now, so skip the TTL.
+            var (status, roster, blizzErr) = await blizzard.GetGuildRosterAsync(forceRefresh: true);
+            if (roster is null)
+                return Results.Json(new { error = "blizzard", detail = blizzErr ?? "Blizzard roster pull failed." },
+                    statusCode: status);
+
+            // Name → roster entry. One realm, so names are the key; when a character
+            // carries a realm we still require it to match the roster's slug.
+            var byName = new Dictionary<string, BlizzardService.RosterMember>(StringComparer.OrdinalIgnoreCase);
+            foreach (var rm in roster) byName[rm.Name] = rm;
+
+            var guildName = opt.Value.GuildName;
+            var now = DateTimeOffset.UtcNow;
+            var characters = await db.Characters.ToListAsync();
+            int inGuild = 0, notInGuild = 0;
+            var matchedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var c in characters)
+            {
+                var hit = byName.TryGetValue(c.Name, out var rm) && RealmMatches(c.Realm, rm!.RealmSlug) ? rm : null;
+                if (hit is not null)
+                {
+                    c.GuildName = guildName;
+                    c.GuildRank = hit.Rank;
+                    matchedNames.Add(c.Name);
+                    inGuild++;
+                }
+                else
+                {
+                    c.GuildName = null;
+                    c.GuildRank = null;
+                    notInGuild++;
+                }
+                c.GuildSyncedAt = now;
+            }
+            await db.SaveChangesAsync();
+
+            // Roster names we hold no character row for — reported so officers know the
+            // roster is ahead of the database, but nothing is created.
+            var unmatchedRoster = roster.Count(rm => !matchedNames.Contains(rm.Name));
+
+            return Results.Json(new { rosterCount = roster.Count, inGuild, notInGuild, unmatchedRoster, syncedAt = now });
         });
 
         // Add a character. Officers may attach it to any member (or leave it an
@@ -220,7 +303,8 @@ public static class MembersEndpoints
                 Spec = input.Spec,
                 Realm = input.Realm,
                 IsMain = input.IsMain ?? false,
-                Notes = input.Notes
+                Notes = input.Notes,
+                Ignored = input.Ignored ?? false
             };
             db.Characters.Add(c);
             if (c.IsMain && c.MemberId is Guid m1)
@@ -254,6 +338,7 @@ public static class MembersEndpoints
             c.Notes = input.Notes;
             c.MemberId = memberId;
             if (input.IsMain is bool im) c.IsMain = im;
+            if (input.Ignored is bool ig) c.Ignored = ig;
 
             if (c.IsMain && c.MemberId is Guid m2)
                 await DemoteOtherMains(db, m2, c.Id);
@@ -280,6 +365,18 @@ public static class MembersEndpoints
             return Results.Json(new { ok = true });
         });
     }
+
+    // A character's realm matches a roster entry when either side is blank (most rows
+    // carry no realm — the guild is single-realm) or the two slugs agree.
+    private static bool RealmMatches(string? charRealm, string? rosterSlug)
+    {
+        if (string.IsNullOrWhiteSpace(charRealm) || string.IsNullOrWhiteSpace(rosterSlug)) return true;
+        return Slug(charRealm).Equals(Slug(rosterSlug), StringComparison.OrdinalIgnoreCase);
+    }
+
+    // "Dreamscythe" / "dream scythe" → "dreamscythe", matching Blizzard's realm slugs.
+    private static string Slug(string s) =>
+        new string(s.Where(ch => !char.IsWhiteSpace(ch) && ch != '-' && ch != '\'').ToArray());
 
     // Resolve which member a create/edit should attach a character to, enforcing
     // the self-only rule for non-officers. Officers may target any existing member

@@ -139,7 +139,9 @@ fly secrets set -a wooback-vash-api `
   "Session__Secret=<any long random string>" `
   "RaidHelper__Token=<raid-helper API token>" `
   "WarcraftLogs__ClientId=<wcl v2 client id>" `
-  "WarcraftLogs__ClientSecret=<wcl v2 client secret>"
+  "WarcraftLogs__ClientSecret=<wcl v2 client secret>" `
+  "Blizzard__ClientId=<battle.net client id>" `
+  "Blizzard__ClientSecret=<battle.net client secret>"
 ```
 `Discord__BotToken` powers **Import from Discord** on the roster page. Create a bot
 under the same Discord application (**Bot → Reset Token**), enable the **Server
@@ -157,7 +159,18 @@ the `WarcraftLogs__*` secrets above. The guild identity — wooback on the **Fre
 Fresh guild is not visible on the retail `www` API. The OAuth token endpoint stays
 on `www.warcraftlogs.com` (shared across game versions).
 
-### 5. Loot sheet
+### 5. Blizzard credentials
+**Sync guild from Blizzard** on the roster page pulls the wooback guild roster from
+the Blizzard Game Data API and stamps each character with the guild it's in, so
+officers can see who has left and ignore them. Create a client at
+https://develop.battle.net/access/clients (the redirect URL is unused for the Client
+Credentials flow) and set its id/secret as the `Blizzard__*` secrets above. The guild
+identity lives in `appsettings.json` (`Blizzard` section): wooback on **Dreamscythe
+(US)** via the `profile-classic1x-us` namespace — Dreamscythe is a Classic
+Anniversary realm, so the retail namespace does not see it. Officer-gated, and the
+sync only updates guild fields: it never creates, deletes, or ignores a character.
+
+### 6. Loot sheet
 - No "Publish to web" needed. `SHEET_EMBED_URL` in `sheet.html` is the sheet's own
   link with `/edit?usp=sharing` replaced by `/preview`. Swap the id to point it at
   a different sheet.
@@ -165,7 +178,7 @@ on `www.warcraftlogs.com` (shared across game versions).
   see it without a Google login. Anyone with the link can read its contents, so
   don't put anything guild-private on a tab of this sheet.
 
-### 6. CORS / origins
+### 7. CORS / origins
 The backend's allowed browser origins (`wooback.info`, `www.wooback.info`,
 `cowdunstan.github.io`) are in `appsettings.json` (`AllowedOrigins`). The board's
 API calls only work from those origins, not a bare `localhost` preview.

@@ -37,6 +37,10 @@ builder.Services.Configure<RaidHelperOptions>(builder.Configuration.GetSection(R
 builder.Services.Configure<WarcraftLogsOptions>(builder.Configuration.GetSection(WarcraftLogsOptions.SectionName));
 builder.Services.AddSingleton<WarcraftLogsService>();
 
+// Blizzard Game Data API: the guild-roster sync behind the members page.
+builder.Services.Configure<BlizzardOptions>(builder.Configuration.GetSection(BlizzardOptions.SectionName));
+builder.Services.AddSingleton<BlizzardService>();
+
 // CORS: only the app's own origins may call the API from a browser. Kept in sync
 // with the origins the old Worker allowed (see raidhelper-proxy.worker.js).
 var allowedOrigins = builder.Configuration.GetSection("AllowedOrigins").Get<string[]>()

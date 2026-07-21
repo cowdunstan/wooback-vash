@@ -43,7 +43,11 @@ public static class RaidLogEndpoints
         // (which may filter to one event key) and the read-only history page.
         static async Task<IResult> LootRows(AppDbContext db, string? eventRaw)
         {
-            var query = db.LootAwards.AsNoTracking().AsQueryable();
+            // Ignored characters are out of the guild, so their history is excluded
+            // everywhere this feeds (officer log, loot history, loot stats). Disenchants
+            // carry no character and always stay.
+            var query = db.LootAwards.AsNoTracking()
+                .Where(l => l.Character == null || !l.Character.Ignored);
             if (!string.IsNullOrWhiteSpace(eventRaw))
             {
                 var key = EventKey(eventRaw);
@@ -68,6 +72,7 @@ public static class RaidLogEndpoints
                     // is the only (lossier) signal.
                     offSpec = l.OffSpec,
                     rolls = l.Rolls
+                        .Where(r => r.Character == null || !r.Character.Ignored)
                         .OrderByDescending(r => r.Amount)
                         .Select(r => new
                         {
@@ -275,7 +280,7 @@ public static class RaidLogEndpoints
             if (string.IsNullOrEmpty(code)) return BadRequest("A report code is required.");
 
             var rows = await db.Attendance.AsNoTracking()
-                .Where(a => a.RaidEvent!.WclReportCode == code)
+                .Where(a => a.RaidEvent!.WclReportCode == code && !a.Character!.Ignored)
                 .OrderBy(a => a.Character!.Name)
                 .Select(a => new
                 {

@@ -29,6 +29,8 @@ public class AppDbContext : DbContext
         b.Entity<Character>(e =>
         {
             e.HasIndex(c => c.Name);
+            // Every roster/loot/attendance read filters ignored characters out.
+            e.HasIndex(c => c.Ignored);
         });
 
         b.Entity<RaidEvent>(e =>
