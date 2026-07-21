@@ -35,9 +35,6 @@
   .rl-card h2{font-family:'Cinzel',serif;font-size:16px;margin:0 0 4px}
   .rl-card .card-sub{color:var(--text-dim,#7f9a92);font-size:12px;margin:0 0 12px}
   .rl-form{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
-  .rl-form input,.rl-form select{background:#0a1815;border:1px solid var(--panel-line,#1e332d);color:var(--text,#dfeee9);border-radius:6px;padding:7px 9px;font-size:13px;font-family:'Inter'}
-  .rl-form input.name{min-width:120px}.rl-form input.item{min-width:150px;flex:1}.rl-form input.note{min-width:110px;flex:1}
-  .rl-form input.event{min-width:150px}
   textarea.rl-paste{width:100%;box-sizing:border-box;min-height:110px;background:#0a1815;border:1px solid var(--panel-line,#1e332d);color:var(--text,#dfeee9);border-radius:6px;padding:9px 10px;font-size:12px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;resize:vertical;margin-bottom:10px}
   table.rl{width:100%;border-collapse:collapse;font-size:13px}
   table.rl th{text-align:left;color:var(--text-dim,#7f9a92);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.6px;padding:6px 8px;border-bottom:1px solid var(--panel-line,#1e332d)}
@@ -79,29 +76,17 @@
     </div>
 
     <h1>Loot log</h1>
-    <p class="subtitle">Every item the guild has awarded. Paste a <a href="https://github.com/papa-smurf/Gargul" target="_blank" rel="noopener">Gargul</a> export to import a whole raid night at once — winners, disenchants, and every bid — or add a one-off award by hand. Attendance lives in its own <a href="attendance.html">Attendance</a> app.</p>
+    <p class="subtitle">Every item the guild has awarded. Paste a <a href="https://github.com/papa-smurf/Gargul" target="_blank" rel="noopener">Gargul</a> export to import a whole raid night at once — winners, disenchants, and every bid. Attendance lives in its own <a href="attendance.html">Attendance</a> app.</p>
 
     <div class="rl-card">
       <h2>Import from Gargul</h2>
-      <p class="card-sub">Paste the export from Gargul's award history (<em>/gargul awardhistory</em> → Export). Re-importing the same export is safe — items already recorded are skipped.</p>
+      <p class="card-sub">In WoW, run <em>/gl export</em> and paste what it gives you here. Gargul must be set to export the detailed format first: in its settings, change <em>&#8220;The format in which awarded loot should be exported&#8221;</em> to <em>Detailed (JSON)</em> &#8212; the other formats don't carry the bids, and won't import. Re-importing the same export is safe: items already recorded are skipped.</p>
       <textarea class="rl-paste" id="gargulPaste" placeholder='[{"awardedTo":"Name-Realm","itemLink":"[Item]","itemID":30050, ...}]'></textarea>
       <div class="rl-form">
         <button class="btn-primary" id="importBtn" onclick="importGargul()">Import export</button>
         <span id="importStatus" style="font-size:11.5px;color:var(--text-dim);min-height:15px;"></span>
       </div>
       <div class="banner" id="importBanner"></div>
-    </div>
-
-    <div class="rl-card">
-      <h2>Add an award by hand</h2>
-      <p class="card-sub">For a one-off item that didn't come through Gargul.</p>
-      <div class="rl-form">
-        <input class="name" id="lootName" placeholder="Character">
-        <input class="item" id="lootItem" placeholder="Item">
-        <input class="note" id="lootNote" placeholder="Note (optional)">
-        <input class="event" id="eventKey" placeholder="Event key (optional)">
-        <button class="btn-ghost" onclick="addLoot()">Add</button>
-      </div>
     </div>
 
     <div class="rl-card">
@@ -219,20 +204,6 @@ async function importGargul(){
     loadAll();
   }catch(err){ if(!['401','403'].includes(err.message)) setImport('Could not reach the guild database.', true); }
   finally{ btn.disabled = false; }
-}
-
-async function addLoot(){
-  const character = document.getElementById('lootName').value.trim();
-  const itemName = document.getElementById('lootItem').value.trim();
-  if(!character || !itemName){ setStatus('Enter a character and an item.', true); return; }
-  const ev = document.getElementById('eventKey').value.trim() || 'default';
-  const body = { event: ev, character, itemName, note: document.getElementById('lootNote').value.trim() || null };
-  try{
-    const res = await api('/api/loot', { method:'POST', body: JSON.stringify(body) });
-    if(!res.ok){ setStatus('Save failed (HTTP ' + res.status + ').', true); return; }
-    document.getElementById('lootName').value = ''; document.getElementById('lootItem').value = ''; document.getElementById('lootNote').value = '';
-    loadAll();
-  }catch(err){ if(!['401','403'].includes(err.message)) setStatus('Could not reach the guild database.', true); }
 }
 
 async function delLoot(id){

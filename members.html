@@ -36,9 +36,6 @@
   .rl-card{background:var(--panel,#0d1a17);border:1px solid var(--panel-line,#1e332d);border-radius:10px;padding:16px;margin-top:14px}
   .rl-card h2{font-family:'Cinzel',serif;font-size:16px;margin:0 0 4px}
   .rl-card .card-sub{color:var(--text-dim,#7f9a92);font-size:12px;margin:0 0 12px}
-  .rl-form{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
-  .rl-form input,.rl-form select{background:#0a1815;border:1px solid var(--panel-line,#1e332d);color:var(--text,#dfeee9);border-radius:6px;padding:7px 9px;font-size:13px;font-family:'Inter'}
-  .rl-form input.name{min-width:130px}.rl-form input.sm{min-width:90px}
   /* Member roster — three cards per row, dropping to two then one as space runs out. */
   #members{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;align-items:start}
   @media (max-width:1200px){ #members{grid-template-columns:repeat(2,minmax(0,1fr))} }
@@ -79,9 +76,6 @@
   .pill-guild{background:rgba(46,230,171,.10);color:#8fd6bd}
   .pill-warn{background:rgba(224,165,61,.16);color:#e0a53d}
   .pill-unknown{background:rgba(127,154,146,.14);color:#7f9a92}
-  .mem-add{padding:10px 14px;border-top:1px solid rgba(30,51,45,.5)}
-  .mem-add .rl-form input{min-width:0;flex:1 1 80px}
-  .mem-add .rl-form input.name{flex:1 1 100%}
   table.rl td strong{font-weight:600}
   .cls{color:#aecabf}
 </style>
@@ -105,7 +99,7 @@
     </div>
 
     <h1>Roster &amp; Alts</h1>
-    <p class="subtitle">Manage the Discord &#8596; WoW main &#8596; alts links. Set each member's main, add or edit alts, reassign a character to another member, and claim unlinked characters created by loot &amp; attendance. Sync the Blizzard roster to see who is still in the guild, and ignore the characters that aren't.</p>
+    <p class="subtitle">Manage the Discord &#8596; WoW main &#8596; alts links. Characters arrive on their own &#8212; from the Blizzard roster, loot logs and raid attendance &#8212; so there's nothing to type in here. Set each member's main, edit a character's details, reassign one to another member, and claim the unlinked. Sync the Blizzard roster to see who is still in the guild, and ignore the characters that aren't.</p>
 
     <div class="rl-toolbar">
       <button class="btn-primary" onclick="loadAll()">Reload</button>
@@ -256,14 +250,6 @@ function renderMembers(members){
         '<span class="mem-seen">' + count + ' char' + (count === 1 ? '' : 's') + (seen ? ' · ' + seen : '') + '</span>' +
       '</div>' +
       rows +
-      '<div class="mem-add"><div class="rl-form">' +
-        '<input class="name" id="add-name-' + m.id + '" placeholder="Character name">' +
-        '<input class="sm" id="add-class-' + m.id + '" placeholder="Class">' +
-        '<input class="sm" id="add-spec-' + m.id + '" placeholder="Spec">' +
-        '<input class="sm" id="add-realm-' + m.id + '" placeholder="Realm">' +
-        '<label style="font-size:12px;color:var(--text-dim);display:flex;gap:5px;align-items:center;"><input type="checkbox" id="add-main-' + m.id + '"> main</label>' +
-        '<button class="btn-ghost" onclick="addChar(\'' + m.id + '\')">Add character</button>' +
-      '</div></div>' +
     '</div>';
   }).join('');
 }
@@ -440,25 +426,6 @@ function reassign(id, newMemberId){
   const wasOrphan = found.memberId == null;
   const msg = newMemberId ? (wasOrphan ? 'Assigned.' : 'Reassigned.') : 'Unassigned.';
   putChar(id, charBody(base, { memberId: newMemberId || null, isMain: keepMain }), msg);
-}
-
-async function addChar(memberId){
-  const name = document.getElementById('add-name-' + memberId).value.trim();
-  if(!name){ setStatus('Enter a character name.', true); return; }
-  const body = {
-    memberId: memberId,
-    name: name,
-    class: document.getElementById('add-class-' + memberId).value.trim() || null,
-    spec: document.getElementById('add-spec-' + memberId).value.trim() || null,
-    realm: document.getElementById('add-realm-' + memberId).value.trim() || null,
-    isMain: document.getElementById('add-main-' + memberId).checked
-  };
-  try{
-    const res = await api('/api/characters', { method:'POST', body: JSON.stringify(body) });
-    if(!res.ok){ setStatus('Add failed (HTTP ' + res.status + ').', true); return; }
-    setStatus('Added ' + name + '.');
-    loadAll();
-  }catch(err){ if(!['401','403'].includes(err.message)) setStatus('Could not reach the guild database.', true); }
 }
 
 function editChar(id){
