@@ -50,9 +50,13 @@ board, identity links, loot, and attendance.
   winners (class-coloured), disenchants, and every bid (stored per-character as rolls);
   re-importing is idempotent (deduped on Gargul's per-award checksum). One-off items
   can still be added by hand. Awards stand alone — they don't need a raid event.
-- **`members.html`** — **roster & alts** (**officers only**): the Discord↔main↔alts
-  identity links; set mains, add/reassign characters, and **claim** the unclaimed
-  characters that attendance & loot create. **Import from Discord** seeds the roster
+- **`members.html`** — **roster & alts**, readable by any signed-in tier and
+  **editable by officers only**: the Discord↔main↔alts identity links; set mains,
+  add/reassign characters, and **claim** the unclaimed characters that attendance
+  & loot create. Everyone else sees the same lists with every control that writes
+  hidden — the API is what enforces it, since both GETs take any session while
+  every write stays officer-gated (or self-only).
+  **Import from Discord** seeds the roster
   by creating a link row for every Discord member holding the member or officer role
   (needs the bot token below), so officers don't have to wait for each raider to
   sign in first.

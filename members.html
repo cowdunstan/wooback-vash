@@ -1,8 +1,9 @@
 <meta charset="utf-8">
 <script>
-/* Officer gate — same as loot.html. Identity-link management is an officer tool;
-   the .NET API enforces it on every call, this just decides whether to show the
-   page (redirect to index.html if not signed in, home.html if not an officer). */
+/* Access gate (home tier) — same as logs.html. Any signed-in tier may read the
+   roster; managing the identity links is officers only, and the .NET API enforces
+   that on every write. This just bounces anyone without a session to the landing
+   page; the read-only trim for non-officers happens further down. */
 (function(){
   var m = location.hash.match(/(?:^#|&)session=([^&]+)/);
   if(m){
@@ -24,7 +25,9 @@
     try{ localStorage.removeItem('vashj_session'); }catch(e){}
     location.replace('index.html');
   } else if(!pl.officer){
-    location.replace('home.html');
+    // Every control that writes is hidden by the .read-only rules below. Set on
+    // <html> because the gate runs before <body> exists.
+    document.documentElement.className += ' read-only';
   }
 })();
 </script>
@@ -56,7 +59,6 @@
   .chr-link:hover strong{text-decoration:underline}
   .chr-actions{display:flex;flex-wrap:wrap;gap:4px;align-items:center;margin-top:6px}
   .chr-actions select{flex:1 1 120px;min-width:0;background:#0a1815;border:1px solid var(--panel-line,#1e332d);color:var(--text,#dfeee9);border-radius:6px;padding:4px 6px;font-size:12px;font-family:'Inter'}
-  .mem-empty{color:var(--text-dim,#7f9a92);padding:10px 14px;font-size:12.5px}
   table.rl{width:100%;border-collapse:collapse;font-size:13px}
   table.rl th{text-align:left;color:var(--text-dim,#7f9a92);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.6px;padding:6px 12px;border-bottom:1px solid var(--panel-line,#1e332d)}
   /* Explicit colour: the page runs in quirks mode, where a <table> drops colour
@@ -78,6 +80,12 @@
   .pill-unknown{background:rgba(127,154,146,.14);color:#7f9a92}
   table.rl td strong{font-weight:600}
   .cls{color:#aecabf}
+  /* Read-only view for non-officers: same lists, minus every control that writes.
+     Cosmetic only — the API is what actually refuses the writes. */
+  html.read-only .chr-actions,
+  html.read-only .acts,
+  html.read-only .officer-copy{display:none}
+  html:not(.read-only) .ro-copy{display:none}
 </style>
 
 <div class="app">
@@ -99,7 +107,7 @@
     </div>
 
     <h1>Roster &amp; Alts</h1>
-    <p class="subtitle">Manage the Discord &#8596; WoW main &#8596; alts links. Characters arrive on their own &#8212; from the Blizzard roster, loot logs and raid attendance &#8212; so there's nothing to type in here. Set each member's main, edit a character's details, reassign one to another member, and claim the unlinked. Sync the Blizzard roster to see who is still in the guild, and ignore the characters that aren't.</p>
+    <p class="subtitle"><span class="ro-copy">Who plays what: every member's Discord name alongside their main and alts, the characters nobody has claimed yet, and the ones the guild ignores. Officers keep these links up to date &#8212; for everyone else this page is read-only.</span><span class="officer-copy">Manage the Discord &#8596; WoW main &#8596; alts links. Characters arrive on their own &#8212; from the Blizzard roster, loot logs and raid attendance &#8212; so there's nothing to type in here. Set each member's main, edit a character's details, reassign one to another member, and claim the unlinked &#8212; members with nothing attached are listed below the unlinked characters. Sync the Blizzard roster to see who is still in the guild, and ignore the characters that aren't.</span></p>
 
     <div class="rl-toolbar">
       <button class="btn-primary" onclick="loadAll()">Reload</button>
@@ -113,16 +121,24 @@
 
     <div class="rl-card">
       <h2>Unlinked characters</h2>
-      <p class="card-sub">Characters created by loot &amp; attendance that aren't attached to any member yet. Assign one to claim it onto a member.</p>
-      <table class="rl"><thead><tr><th>Character</th><th>Class / spec</th><th>Realm</th><th style="width:38%">Assign to member</th></tr></thead>
+      <p class="card-sub">Characters created by loot &amp; attendance that aren't attached to any member yet.<span class="officer-copy"> Assign one to claim it onto a member.</span></p>
+      <table class="rl"><thead><tr><th>Character</th><th>Class / spec</th><th>Realm</th><th class="acts" style="width:38%">Assign to member</th></tr></thead>
         <tbody id="orphanBody"><tr><td colspan="4" class="rl-empty">Nothing loaded.</td></tr></tbody>
       </table>
     </div>
 
     <div class="rl-card">
+      <h2>Members without characters</h2>
+      <p class="card-sub">Identity links with nothing attached &#8212; imported from Discord, or everything they had is ignored.<span class="officer-copy"> Claim a character onto them from the unlinked list above.</span></p>
+      <table class="rl"><thead><tr><th>Member</th><th>Discord</th><th>Last seen</th></tr></thead>
+        <tbody id="emptyMemberBody"><tr><td colspan="3" class="rl-empty">Nothing loaded.</td></tr></tbody>
+      </table>
+    </div>
+
+    <div class="rl-card">
       <h2>Ignored characters</h2>
-      <p class="card-sub">Characters marked as not part of the guild &#8212; bank alts, transfers, ex-guildies. They're hidden from the roster above and their loot &amp; attendance are left out of the history and stats pages. Nothing is deleted: un-ignore to bring it all back.</p>
-      <table class="rl"><thead><tr><th>Character</th><th>Class / spec</th><th>Guild</th><th>Was on</th><th style="width:1%"></th></tr></thead>
+      <p class="card-sub">Characters marked as not part of the guild &#8212; bank alts, transfers, ex-guildies. They're hidden from the roster above and their loot &amp; attendance are left out of the history and stats pages. Nothing is deleted<span class="officer-copy">: un-ignore to bring it all back</span>.</p>
+      <table class="rl"><thead><tr><th>Character</th><th>Class / spec</th><th>Guild</th><th>Was on</th><th class="acts" style="width:1%"></th></tr></thead>
         <tbody id="ignoredBody"><tr><td colspan="5" class="rl-empty">Nothing loaded.</td></tr></tbody>
       </table>
     </div>
@@ -214,36 +230,37 @@ function renderMembers(members){
   MEMBERS = members;
   MEMBER_OPTIONS = members.slice()
     .sort((a, b) => memberLabel(a).localeCompare(memberLabel(b), undefined, { sensitivity:'base' }));
+  // Members with nothing attached get their own compact section further down rather
+  // than a card each — an imported Discord roster is mostly these, and they were
+  // burying the members who actually have characters.
+  const withChars = members.filter(m => (m.characters || []).length);
+  renderEmptyMembers(members.filter(m => !(m.characters || []).length));
   const root = document.getElementById('members');
   if(!members.length){ root.innerHTML = '<div class="rl-card"><p class="rl-empty">No members yet. Members are created automatically when someone signs in.</p></div>'; return; }
-  root.innerHTML = members.map(m => {
+  if(!withChars.length){ root.innerHTML = '<div class="rl-card"><p class="rl-empty">No member has a character linked yet — everyone is listed below.</p></div>'; return; }
+  root.innerHTML = withChars.map(m => {
     const label = esc(memberLabel(m));
     const user = m.discordUsername ? '@' + esc(m.discordUsername) : '';
     const seen = m.lastSeenAt ? 'Last seen ' + esc(fmtWhen(m.lastSeenAt)) : '';
-    let rows;
-    if(!m.characters || !m.characters.length){
-      rows = '<div class="mem-empty">No characters linked yet.</div>';
-    } else {
-      rows = m.characters.map(c => {
-        const meta = [clsSpec(c), c.realm ? esc(c.realm) : null].filter(Boolean).join(' <span class="muted">·</span> ');
-        const quoted = esc(c.name).replace(/'/g,"\\'");
-        return '<div class="chr">' +
-          '<div class="chr-top">' + charName(c.name, c.cls, c.id) +
-            (c.isMain ? '<span class="pill pill-main">Main</span>' : '<span class="pill pill-alt">Alt</span>') +
-            guildBadge(c) +
-          '</div>' +
-          '<div class="chr-meta">' + meta + '</div>' +
-          '<div class="chr-actions">' +
-            memberSelect(m.id, 'reassign(\'' + c.id + '\', this.value)') +
-            (c.isMain ? '' : '<button class="lnk" onclick="setMain(\'' + c.id + '\')">Make main</button>') +
-            '<button class="lnk" onclick="editChar(\'' + c.id + '\')">Edit</button>' +
-            '<button class="lnk" title="Not a guild character — hide it and leave it out of loot &amp; attendance stats" onclick="ignoreChar(\'' + c.id + '\',\'' + quoted + '\')">Ignore</button>' +
-            '<button class="rl-del" title="Delete" onclick="delChar(\'' + c.id + '\',\'' + quoted + '\')">✕</button>' +
-          '</div>' +
-        '</div>';
-      }).join('');
-    }
-    const count = (m.characters || []).length;
+    const rows = m.characters.map(c => {
+      const meta = [clsSpec(c), c.realm ? esc(c.realm) : null].filter(Boolean).join(' <span class="muted">·</span> ');
+      const quoted = esc(c.name).replace(/'/g,"\\'");
+      return '<div class="chr">' +
+        '<div class="chr-top">' + charName(c.name, c.cls, c.id) +
+          (c.isMain ? '<span class="pill pill-main">Main</span>' : '<span class="pill pill-alt">Alt</span>') +
+          guildBadge(c) +
+        '</div>' +
+        '<div class="chr-meta">' + meta + '</div>' +
+        '<div class="chr-actions">' +
+          memberSelect(m.id, 'reassign(\'' + c.id + '\', this.value)') +
+          (c.isMain ? '' : '<button class="lnk" onclick="setMain(\'' + c.id + '\')">Make main</button>') +
+          '<button class="lnk" onclick="editChar(\'' + c.id + '\')">Edit</button>' +
+          '<button class="lnk" title="Not a guild character — hide it and leave it out of loot &amp; attendance stats" onclick="ignoreChar(\'' + c.id + '\',\'' + quoted + '\')">Ignore</button>' +
+          '<button class="rl-del" title="Delete" onclick="delChar(\'' + c.id + '\',\'' + quoted + '\')">✕</button>' +
+        '</div>' +
+      '</div>';
+    }).join('');
+    const count = m.characters.length;
     return '<div class="mem">' +
       '<div class="mem-head"><span class="mem-name">' + label + '</span>' +
         (user ? '<span class="mem-user">' + user + '</span>' : '') +
@@ -252,6 +269,23 @@ function renderMembers(members){
       rows +
     '</div>';
   }).join('');
+}
+
+// Members holding no character at all — including those whose every character is
+// ignored, since the API leaves those out of the member's list. Sorted by the label
+// officers read, like the dropdowns; the cards above keep the API's order.
+function renderEmptyMembers(rows){
+  const b = document.getElementById('emptyMemberBody');
+  if(!rows.length){ b.innerHTML = '<tr><td colspan="3" class="rl-empty">Every member has at least one character linked.</td></tr>'; return; }
+  b.innerHTML = rows.slice()
+    .sort((a, b2) => memberLabel(a).localeCompare(memberLabel(b2), undefined, { sensitivity:'base' }))
+    .map(m =>
+      '<tr>' +
+        '<td><strong>' + esc(memberLabel(m)) + '</strong></td>' +
+        '<td class="muted">' + (m.discordUsername ? '@' + esc(m.discordUsername) : '—') + '</td>' +
+        '<td class="muted">' + (m.lastSeenAt ? esc(fmtWhen(m.lastSeenAt)) : 'never') + '</td>' +
+      '</tr>'
+    ).join('');
 }
 
 function renderOrphans(rows){
@@ -263,7 +297,7 @@ function renderOrphans(rows){
       '<td>' + charName(c.name, c.cls, c.id) + ' ' + guildBadge(c) + '</td>' +
       '<td>' + clsSpec(c) + '</td>' +
       '<td class="muted">' + (c.realm ? esc(c.realm) : '—') + '</td>' +
-      '<td><div class="row-actions">' + memberSelect('', 'reassign(\'' + c.id + '\', this.value)') +
+      '<td class="acts"><div class="row-actions">' + memberSelect('', 'reassign(\'' + c.id + '\', this.value)') +
         '<button class="lnk" onclick="ignoreChar(\'' + c.id + '\',\'' + esc(c.name).replace(/'/g,"\\'") + '\')">Ignore</button>' +
       '</div></td>' +
     '</tr>'
@@ -282,7 +316,7 @@ function renderIgnored(rows){
       '<td>' + clsSpec(c) + '</td>' +
       '<td>' + guildBadge(c) + '</td>' +
       '<td class="muted">' + (c.member ? esc(c.member) : '<span class="muted">unlinked</span>') + '</td>' +
-      '<td><div class="row-actions">' +
+      '<td class="acts"><div class="row-actions">' +
         '<button class="lnk" onclick="unignoreChar(\'' + c.id + '\',\'' + quoted + '\')">Un-ignore</button>' +
         '<button class="rl-del" title="Delete" onclick="delChar(\'' + c.id + '\',\'' + quoted + '\')">✕</button>' +
       '</div></td>' +

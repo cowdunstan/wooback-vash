@@ -40,10 +40,12 @@ public static class MembersEndpoints
 
     public static void MapMembersEndpoints(this IEndpointRouteBuilder app)
     {
-        // All members with their linked characters.
+        // All members with their linked characters. Readable by any signed-in tier —
+        // the roster page is read-only for non-officers, who need this to see who
+        // plays what. Every write below stays officer-gated (or self-only).
         app.MapGet("/api/members", async (HttpContext ctx, SessionTokenService tokens) =>
         {
-            var (_, error) = ctx.RequireOfficer(tokens);
+            var (_, error) = ctx.RequireSession(tokens);
             if (error is not null) return error;
             var db = ctx.RequestServices.GetService<AppDbContext>();
             if (db is null) return DbUnavailable();
@@ -191,9 +193,11 @@ public static class MembersEndpoints
         // ?ignored=true instead returns every ignored character, linked or not — that's
         // the "Ignored characters" section at the bottom of the members page — and the
         // linked filter does not apply. Otherwise ignored characters are left out.
+        // Readable by any signed-in tier, like GET /api/members — the roster page
+        // shows these lists read-only to non-officers.
         chars.MapGet("", async (HttpContext ctx, SessionTokenService tokens) =>
         {
-            var (_, error) = ctx.RequireOfficer(tokens);
+            var (_, error) = ctx.RequireSession(tokens);
             if (error is not null) return error;
             var db = ctx.RequestServices.GetService<AppDbContext>();
             if (db is null) return DbUnavailable();
