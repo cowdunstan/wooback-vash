@@ -180,6 +180,21 @@ public static class AuthEndpoints
             var session = tokens.Sign(uid, name, isOfficer);
             return RedirectToApp(ctx, d, "/home.html", "session", session, clearState: true);
         });
+
+        // Sliding renewal. The pages call this on load once a session is past its
+        // halfway point, so an active raider never gets bounced back to Discord.
+        // Only a still-valid token can be renewed, and only until the session hits
+        // its absolute lifetime cap — after that a real sign-in re-reads roles.
+        app.MapPost("/auth/refresh", (HttpContext ctx, SessionTokenService tokens) =>
+        {
+            var (session, err) = ctx.RequireSession(tokens);
+            if (err is not null) return err;
+
+            var renewed = tokens.Renew(session!);
+            return renewed is null
+                ? Results.Json(new { error = "unauthorized", detail = "Session too old — sign in again." }, statusCode: 401)
+                : Results.Json(new { session = renewed });
+        });
     }
 
     // Redirect the browser back to the static site, passing a result in the URL
