@@ -149,18 +149,30 @@ function mergeStatus(a, b){
 }
 
 function buildPool(signupsA, signupsB, members){
-  // Character name → the member who owns it.
+  // Two ways to recognise a raider, in order of how much they can be trusted.
+  // The Discord id is who signed up, full stop; a character name only matches
+  // when the roster already knows that character, which is exactly what fails
+  // for a fresh alt or a name typed with a guild tag on it.
+  const byDiscord = new Map();
   const byName = new Map();
-  members.forEach(m => (m.characters || []).forEach(c => {
-    byName.set(String(c.name || '').toLowerCase(), m);
-  }));
+  members.forEach(m => {
+    if(m.discordUserId) byDiscord.set(String(m.discordUserId), m);
+    (m.characters || []).forEach(c => byName.set(String(c.name || '').toLowerCase(), m));
+  });
 
   // Fold both signups into one entry per person.
   const persons = new Map();
+  let byDiscordCount = 0;
   [['a', signupsA], ['b', signupsB]].forEach(([source, signups]) => {
     signups.forEach(s => {
-      const member = byName.get(s.name.toLowerCase()) || null;
-      const personId = member ? 'm:' + member.id : 'u:' + s.name.toLowerCase();
+      const viaDiscord = s.userId ? byDiscord.get(s.userId) : null;
+      const member = viaDiscord || byName.get(s.name.toLowerCase()) || null;
+      if(viaDiscord) byDiscordCount++;
+      // Even with no roster row, a Discord id still pairs someone's two signups
+      // as one person — so they can't be double-booked into one group.
+      const personId = member ? 'm:' + member.id
+                     : s.userId ? 'd:' + s.userId
+                     : 'u:' + s.name.toLowerCase();
       let p = persons.get(personId);
       if(!p){
         p = {
@@ -184,7 +196,10 @@ function buildPool(signupsA, signupsB, members){
   persons.forEach(p => {
     if(!p.member){
       unlinkedCount++;
-      chips.push(toChip(p.signups[0], p, 'UNLINKED'));
+      // No roster to expand, so they get the characters they actually signed up
+      // with — one each when they signed up to both raids.
+      if(p.sources.length > 1) bothCount++;
+      p.signups.forEach(s => chips.push(toChip(s, p, 'UNLINKED')));
       return;
     }
     const characters = p.member.characters || [];
@@ -210,6 +225,7 @@ function buildPool(signupsA, signupsB, members){
 
   const notes = [];
   if(bothCount) notes.push(`${bothCount} signed up to both`);
+  if(byDiscordCount) notes.push(`${byDiscordCount} matched by Discord id`);
   if(noMainCount) notes.push(`${noMainCount} with no main on the roster`);
   if(unlinkedCount) notes.push(`${unlinkedCount} not linked to a member`);
   setStatus(`${persons.size} raiders, ${chips.length} characters in the pool` +
