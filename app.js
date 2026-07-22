@@ -1,35 +1,13 @@
 /* ───────────────────────── Officer session ─────────────────────────
-   The board.html guard already redirected non-officers away. The shared
-   session helpers (sessionToken/sessionName/logout/isOfficer) live in menu.js,
-   which is loaded before this file. Here we just wrap the token as a header to
-   authorize Raid-Helper calls (the Worker verifies its signature). */
-function rhHeaders(){
-  const t = sessionToken();
-  return t ? { 'Authorization': 'Bearer ' + t } : {};
-}
-
-const CLASS_COLORS = {
-  warrior:'#C79C6E', paladin:'#F58CBA', hunter:'#ABD473', rogue:'#FFF569',
-  priest:'#FFFFFF', shaman:'#0070DE', mage:'#69CCF0', warlock:'#9482C9', druid:'#FF7D0A'
-};
-const ROLE_FALLBACK = {
-  tank:'#8f9ba8'
-};
-
-// Tentative/Bench rows carry a spec tag but no class header, so infer the class
-// from the spec. Ambiguous specs (holy/restoration/protection) pick the most
-// common class; that only matters when no class header is present.
-const SPEC_TO_CLASS = {
-  arms:'warrior', fury:'warrior', protection:'warrior',
-  assassination:'rogue', combat:'rogue', subtlety:'rogue',
-  beastmastery:'hunter', marksmanship:'hunter', survival:'hunter',
-  arcane:'mage', fire:'mage', frost:'mage',
-  affliction:'warlock', demonology:'warlock', destruction:'warlock',
-  discipline:'priest', shadow:'priest', holy:'priest',
-  balance:'druid', feral:'druid', guardian:'druid', restoration:'druid',
-  retribution:'paladin',
-  enhancement:'shaman', elemental:'shaman'
-};
+   The board.html guard already redirected non-officers away. The shared session
+   helpers (sessionToken/sessionName/logout/isOfficer) live in menu.js, which is
+   loaded before this file — as does the shared `RH` module: the class/spec
+   tables, the role classifiers, the Raid-Helper fetchers and the chip markup,
+   all of which groups.html uses too. Aliased here so the board's own code reads
+   the way it always has. */
+const rhHeaders = RH.headers;
+const CLASS_COLORS = RH.CLASS_COLORS;
+const SPEC_TO_CLASS = RH.SPEC_TO_CLASS;
 
 // Non-class section headers and the status they assign.
 const SPECIAL_STATUS = {
@@ -164,27 +142,9 @@ function parseRoster(){
   autoFill();
 }
 
-// Specs decide the role when the roster provides them; otherwise fall back to class.
-const HEALING_SPECS = ['holy','restoration','discipline'];
-const HEALER_CLASSES = ['priest','paladin','druid','shaman'];
-const RANGED_SPECS = ['shadow','elemental','balance','arcane','fire','frost',
-                      'affliction','demonology','destruction','beastmastery',
-                      'marksmanship','survival'];
-const PURE_RANGE = ['mage','warlock','hunter'];
-
-function isTank(m){
-  return m.role === 'tank' || m.spec === 'protection' || m.spec === 'guardian';
-}
-function isHealer(m){
-  if(isTank(m)) return false;
-  if(m.spec) return HEALING_SPECS.includes(m.spec);
-  return HEALER_CLASSES.includes(m.cls);
-}
-function isRanged(m){
-  if(isTank(m) || isHealer(m)) return false;
-  if(m.spec) return RANGED_SPECS.includes(m.spec);
-  return PURE_RANGE.includes(m.cls);
-}
+// Specs decide the role when the roster provides them; otherwise fall back to
+// class. Shared with the groups page — see RH in menu.js.
+const isTank = RH.isTank, isHealer = RH.isHealer, isRanged = RH.isRanged;
 
 function autoFill(){
   // Only confirmed raiders are auto-placed; tentative/bench wait in the pool.
@@ -270,34 +230,12 @@ function clearAll(){
 
 function memberById(id){ return roster.find(m=>m.id===id); }
 
-function chipHTML(member, withClear){
-  const color = CLASS_COLORS[member.cls] || ROLE_FALLBACK[member.role] || '#2ee6ab';
-  const clearBtn = '';
-  const num = member.num!=null ? `<span class="num">${member.num}</span>` : '';
-  const roleTag = member.cls ? member.cls.slice(0,3).toUpperCase() : (member.role ? member.role.slice(0,3).toUpperCase() : '');
-  const status = (member.status && member.status !== 'active')
-    ? `<span class="stag ${member.status}">${member.status === 'tentative' ? 'TENT' : 'BENCH'}</span>` : '';
-  return `<span class="chip" draggable="true" data-id="${member.id}" style="--class-color:${color}">
-            ${num}${member.name}${roleTag?`<span class="cls">${roleTag}</span>`:''}${status}${clearBtn}
-          </span>`;
-}
+const chipHTML = RH.chipHTML;
 
-// Wire drag-out on chips and drop-to-unassign on a pool container.
+// Wire drag-out on chips and drop-to-unassign on a pool container. Status is
+// stored on the member, so a chip returns to the right section.
 function wirePool(el){
-  el.querySelectorAll('.chip').forEach(c=>{
-    c.addEventListener('dragstart', e=>{
-      e.dataTransfer.setData('text/plain', c.dataset.id);
-      e.dataTransfer.effectAllowed = 'move';
-    });
-  });
-  el.ondragover = e=>{ e.preventDefault(); el.style.background='rgba(46,230,171,.08)'; };
-  el.ondragleave = ()=>{ el.style.background=''; };
-  el.ondrop = e=>{
-    e.preventDefault();
-    el.style.background='';
-    const id = e.dataTransfer.getData('text/plain');
-    if(id) unassignId(id);   // status is stored on the member, so it returns to the right section
-  };
+  RH.wirePoolDrag(el, id => unassignId(id));
 }
 
 function renderPool(){
@@ -310,7 +248,7 @@ function renderPool(){
   const rEl = document.getElementById('reservePool');
   if(reserve.length){
     wrap.style.display = '';
-    rEl.innerHTML = reserve.map(m=>chipHTML(m,false)).join('');
+    rEl.innerHTML = reserve.map(m=>chipHTML(m)).join('');
     wirePool(rEl);
   } else {
     wrap.style.display = 'none';
@@ -318,7 +256,7 @@ function renderPool(){
   }
 
   const el = document.getElementById('rosterPool');
-  el.innerHTML = active.length ? active.map(m=>chipHTML(m,false)).join('') : '<span class="pool-empty">Everyone is assigned. Nice.</span>';
+  el.innerHTML = active.length ? active.map(m=>chipHTML(m)).join('') : '<span class="pool-empty">Everyone is assigned. Nice.</span>';
   wirePool(el);
 }
 
@@ -378,7 +316,7 @@ function renderSlotGroup(containerId, type, positions, extraClass){
     div.className = 'slot' + (extraClass?' '+extraClass:'');
     div.style.left = pos.x+'px';
     div.style.top = pos.y+'px';
-    const color = member ? (CLASS_COLORS[member.cls] || ROLE_FALLBACK[member.role] || '') : '';
+    const color = member ? (CLASS_COLORS[member.cls] || RH.ROLE_FALLBACK[member.role] || '') : '';
     div.innerHTML = `<div class="ring ${member?'filled':''}" style="${member?`border-color:${color||'var(--teal)'}`:''}">
         ${member ? `<span class="name-wrap"><span class="name-chip" draggable="true" data-id="${member.id}" style="background:${color||'#2ee6ab'}">${member.name}</span></span>` : (type==='healer'?'heal':'range')}
       </div>
@@ -573,32 +511,14 @@ async function loadBoard(){
 
 /* ───────────────────────── Raid-Helper API integration ─────────────────────────
    Press "Load events" to list this server's events, then pick one to pull its
-   signups onto the board. There is no token in this page: the Raid-Helper API
-   token is stored as a secret on the proxy Worker (RH_TOKEN — see
-   raidhelper-proxy.worker.js), which attaches it server-side. The server ID is
-   fixed below, so nothing needs to be entered here. */
-const RH_SERVER_ID = '1462481995119722649';
-// List events whose start time is no older than this many days (upcoming events
-// are always included). Raise it to reach further back.
-const RH_WINDOW_DAYS = 7;
-
-// Raid-Helper rejects cross-origin browser requests, so every call routes through
-// our own CORS proxy (the .NET backend, server/WoobackVash.Api), which forwards
-// the path unchanged to https://raid-helper.xyz/api, adds the token, and returns
-// the CORS header the browser needs. Same host as everything else — API_BASE is
-// defined in menu.js, which board.html loads before this file.
-function rhApiBase(){ return API_BASE; }
+   signups onto the board. There is no token in this page: it is a secret on the
+   backend (RaidHelper__Token), attached server-side by the proxy. The fetching
+   itself lives in RH (menu.js) — the groups page uses the same calls; what's
+   left here is the board's own picker, status line and roster hand-off. */
 
 // The storage key for the current board: a Raid-Helper event id once one is
 // loaded, otherwise "default" for a manually built board.
 let currentBoardKey = 'default';
-
-// Raid-Helper signup buttons that represent a status rather than a class.
-const RH_STATUS_MAP = {
-  bench:'bench', standby:'bench',
-  tentative:'tentative', late:'tentative',
-  absence:'absence', absent:'absence', declined:'absence'
-};
 
 function setRhStatus(msg, isErr){
   const el = document.getElementById('rhStatus');
@@ -606,102 +526,41 @@ function setRhStatus(msg, isErr){
   el.style.color = isErr ? 'var(--amber)' : 'var(--text-dim)';
 }
 
-// Turn Raid-Helper signups into the internal roster shape used by the board.
-function mapRaidHelperSignups(signups){
-  const out = [];
-  const seen = new Set();
-  signups.forEach(s=>{
-    const name = String(s.name || '').replace(/[`:]/g,'').replace(/^\[|\]$/g,'').trim();
-    if(!name) return;
-
-    const classKey = String(s.className || '').toLowerCase().trim();
-    const spec = String(s.specName || '').toLowerCase().replace(/[^a-z]/g,'');
-
-    // status may live in className (Bench/Late/Tentative/Absence) or a status field
-    const status = RH_STATUS_MAP[classKey]
-                || RH_STATUS_MAP[String(s.status || '').toLowerCase()]
-                || 'active';
-    if(status === 'absence') return;           // absent raiders never reach the board
-
-    // resolve a real class: className if valid, else infer from spec
-    const cls  = CLASS_COLORS[classKey] ? classKey
-               : (CLASS_COLORS[SPEC_TO_CLASS[spec]] ? SPEC_TO_CLASS[spec] : '');
-    const role = cls || classKey || SPEC_TO_CLASS[spec] || '';
-
-    const key = name.toLowerCase();
-    if(seen.has(key)) return;                  // de-dupe by name, first signup wins
-    seen.add(key);
-
-    out.push({ id:'r'+(idCounter++), name, cls, role, spec, num:null, status });
-  });
-  return out;
+// Report a failed RH call. Returns nothing useful — callers just bail after it.
+// A 401 means the session died under us, so hand the raider back to Discord.
+function reportRhError(err, notFoundMsg){
+  console.error('Raid-Helper call failed:', err);
+  if(err.status === 401){ setRhStatus('Session expired — signing you out…', true); setTimeout(logout, 1200); return; }
+  if(err.status === 403){ setRhStatus('Unauthorized — the Raid-Helper token isn’t set on the backend.', true); return; }
+  if(err.status === 404){ setRhStatus(notFoundMsg, true); return; }
+  setRhStatus(err.message + ' See the browser console.', true);
 }
 
-// Friendly hint for a failed fetch — the usual culprit is the proxy Worker being
-// down or not allowing this origin (ALLOWED_ORIGIN in raidhelper-proxy.worker.js).
-function rhNetworkHint(){
-  return 'Could not reach the proxy — is the backend up and is this origin allowed?';
-}
-
-// Human-readable date for an event, for the picker labels.
-function fmtEventDate(ev){
-  const t = Number(ev.startTime || ev.startTimestamp || 0);
-  if(t){
-    const d = new Date(t * 1000);
-    if(!isNaN(d.getTime())){
-      return d.toLocaleDateString(undefined, { month:'short', day:'numeric' }) +
-             ' ' + d.toLocaleTimeString(undefined, { hour:'2-digit', minute:'2-digit' });
-    }
-  }
-  return [ev.date, ev.time].filter(Boolean).join(' ');
-}
-
-// List every event on the server (the proxy Worker supplies the token) and fill
-// the picker.
+// List every event on the server (the proxy supplies the token) and fill the picker.
 async function loadServerEvents(){
   setRhStatus('Loading events…');
 
-  let data;
+  let events;
   try {
-    const res = await fetch(`${rhApiBase()}/v4/servers/${encodeURIComponent(RH_SERVER_ID)}/events`, { headers: rhHeaders() });
-    if(res.status === 401){ setRhStatus('Session expired — signing you out…', true); setTimeout(logout, 1200); return; }
-    if(res.status === 403){ setRhStatus('Unauthorized — the Raid-Helper token isn’t set on the backend.', true); return; }
-    if(res.status === 404){ setRhStatus('Server not found — check RH_SERVER_ID.', true); return; }
-    if(!res.ok){ setRhStatus('Raid-Helper returned HTTP ' + res.status + '.', true); return; }
-    data = await res.json();
+    events = await RH.listEvents();
   } catch(err){
-    setRhStatus(rhNetworkHint() + ' See the browser console.', true);
-    console.error('Raid-Helper server-events fetch failed:', err);
+    reportRhError(err, 'Server not found — check RH.SERVER_ID in menu.js.');
     return;
   }
-
-  // Field name for the events array isn't verified against a live token — log the
-  // raw response so an unexpected shape is easy to diagnose from the console.
-  console.debug('Raid-Helper server-events response:', data);
-  const allEvents = data.postedEvents || data.events || data.scheduledEvents ||
-                    (Array.isArray(data) ? data : []);
-
-  // Keep events from the past RH_WINDOW_DAYS onward — recent plus all upcoming.
-  const cutoff = Date.now() / 1000 - RH_WINDOW_DAYS * 86400;
-  const events = allEvents.filter(ev=>{
-    const t = Number(ev.startTime || ev.startTimestamp || 0);
-    return t >= cutoff;
-  });
 
   const sel = document.getElementById('rhEventSelect');
   const row = document.getElementById('rhEventPickRow');
   if(!events.length){
     row.style.display = 'none';
-    setRhStatus(allEvents.length
-      ? `No recent or upcoming events (server has ${allEvents.length} total).`
+    setRhStatus(events.total
+      ? `No recent or upcoming events (server has ${events.total} total).`
       : 'No events found on that server.', true);
     return;
   }
-  // Most recent / furthest-out first, so the latest event is pre-selected.
-  events.sort((a,b)=> Number(b.startTime || 0) - Number(a.startTime || 0));
+  // Newest first, so the latest event is pre-selected.
   sel.innerHTML = events.map(ev=>{
     const id = ev.id || ev.eventId || '';
-    const when = fmtEventDate(ev);
+    const when = RH.fmtEventDate(ev);
     const title = String(ev.title || 'Untitled event').replace(/</g,'&lt;');
     return `<option value="${id}">${when ? when + ' — ' : ''}${title}</option>`;
   }).join('');
@@ -726,20 +585,14 @@ async function fetchEventById(eventId){
 
   let data;
   try {
-    const res = await fetch(`${rhApiBase()}/v4/events/${encodeURIComponent(eventId)}`, { headers: rhHeaders() });
-    if(res.status === 401){ setRhStatus('Session expired — signing you out…', true); setTimeout(logout, 1200); return; }
-    if(res.status === 403){ setRhStatus('Unauthorized — the Raid-Helper token isn’t set on the backend.', true); return; }
-    if(res.status === 404){ setRhStatus('Event not found (it may have been deleted).', true); return; }
-    if(!res.ok){ setRhStatus('Raid-Helper returned HTTP ' + res.status + '.', true); return; }
-    data = await res.json();
+    data = await RH.fetchEvent(eventId);
   } catch(err){
-    setRhStatus(rhNetworkHint() + ' See the browser console.', true);
-    console.error('Raid-Helper event fetch failed:', err);
+    reportRhError(err, 'Event not found (it may have been deleted).');
     return;
   }
 
-  const signups = data.signUps || data.signups || [];
-  const members = mapRaidHelperSignups(signups);
+  // The board's own id counter mints the ids, because it rides along in saved snapshots.
+  const members = RH.mapSignups(data.signUps || data.signups || [], () => 'r' + (idCounter++));
   if(!members.length){ setRhStatus('No usable signups found on that event.', true); return; }
 
   roster = members;

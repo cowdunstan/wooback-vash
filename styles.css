@@ -310,3 +310,37 @@
   .log-date{color:var(--text);}
   .log-owner{color:var(--text-dim);}
   .log-go{color:var(--teal);font-weight:700;letter-spacing:.3px;}
+
+  /* ── 2 group organisation (groups.html) ── */
+  .picker{
+    background:#0a1815;border:1px solid var(--panel-line);color:var(--text);
+    border-radius:6px;padding:7px 10px;font-size:13px;font-family:'Inter';min-width:300px;
+  }
+  .group-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:20px;}
+  .group-col{
+    background:var(--panel);border:1px solid var(--panel-line);border-radius:10px;
+    padding:14px 16px;
+  }
+  .group-head{
+    display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:4px;
+    font-family:'Cinzel',serif;font-size:16px;font-weight:700;color:#eafff6;letter-spacing:.3px;
+  }
+  .group-head span:last-child{font-family:'Inter';font-size:12px;font-weight:600;color:var(--teal);}
+  .group-tally{display:flex;flex-wrap:wrap;gap:12px;font-size:10.5px;color:var(--text-dim);
+    text-transform:uppercase;letter-spacing:1px;font-weight:600;margin-bottom:10px;}
+  .group-tally b{color:var(--text);font-size:12px;}
+  .group-list{
+    align-content:flex-start;min-height:120px;border:1px dashed var(--panel-line);
+    border-radius:8px;padding:10px;transition:border-color .15s, background .15s;
+  }
+  /* While a chip is dragged: this group already holds that raider, or is full. */
+  .group-list.clash{border-color:var(--amber);background:rgba(232,163,61,.07);}
+  .group-list.full{opacity:.55;}
+  .stag.main{background:rgba(46,230,171,.18);color:var(--teal);}
+  .stag.alt{background:rgba(168,117,232,.2);color:#c9aef5;}
+  .stag.unlinked,.stag.no-main{background:rgba(232,163,61,.22);color:var(--amber);}
+
+  @media (max-width:760px){
+    .group-grid{grid-template-columns:1fr;}
+    .picker{min-width:0;width:100%;}
+  }

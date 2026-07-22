@@ -1,0 +1,119 @@
+<meta charset="utf-8">
+<script>
+/* Officer gate. Runs before anything renders: captures a session handed back by
+   the auth backend (groups.html#session=…). Bounces to the landing page if there
+   is no unexpired session, or to the home page if the session isn't an officer
+   one. The signature is enforced server-side on every API call; these client
+   checks only decide whether to show the page at all. */
+(function(){
+  var m = location.hash.match(/(?:^#|&)session=([^&]+)/);
+  if(m){
+    try{ localStorage.setItem('vashj_session', decodeURIComponent(m[1])); }catch(e){}
+    history.replaceState(null, '', location.pathname + location.search);
+  }
+  function payload(tok){
+    if(!tok) return null;
+    try{
+      var p = tok.split('.')[0].replace(/-/g,'+').replace(/_/g,'/');
+      while(p.length % 4) p += '=';
+      return JSON.parse(atob(p));
+    }catch(e){ return null; }
+  }
+  var tok = null;
+  try{ tok = localStorage.getItem('vashj_session'); }catch(e){}
+  var pl = payload(tok);
+  if(!pl || !pl.exp || pl.exp <= Math.floor(Date.now()/1000)){
+    try{ localStorage.removeItem('vashj_session'); }catch(e){}
+    location.replace('index.html');
+  } else if(!pl.officer){
+    location.replace('home.html');
+  }
+})();
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+
+<div class="app">
+  <div class="wrap">
+    <div class="authbar">
+      <span class="authbar-left">
+        <div class="nav">
+          <button class="hamburger" id="navToggle" aria-label="Menu" aria-expanded="false" aria-controls="navDrawer">
+            <span></span><span></span><span></span>
+          </button>
+          <nav class="nav-drawer" id="navDrawer"></nav>
+        </div>
+        <span class="eyebrow">Raid night</span>
+      </span>
+      <span class="authbar-right">
+        <span id="authWho" class="auth-who"></span>
+        <button class="btn-ghost" onclick="logout()">Sign out</button>
+      </span>
+    </div>
+    <h1>2 group organisation</h1>
+    <p class="subtitle">Load the two signups — mains and alts — then drag raiders into the groups. Nobody appears twice in one group: someone signed up to both raids takes one slot in each. Double-click a name to send it back to the pool.</p>
+
+    <div class="roster-panel">
+      <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
+        <button class="btn-primary" onclick="loadEvents()">Load events</button>
+        <span style="font-size:11px;color:var(--text-dim);">Lists this server's recent and upcoming Raid-Helper events.</span>
+      </div>
+      <div id="rhEventPickRow" style="display:none;flex-wrap:wrap;gap:10px;align-items:flex-end;margin-top:10px;">
+        <div class="field">
+          <label>Raid 1 signup</label>
+          <select id="rhEventA" class="picker"></select>
+        </div>
+        <div class="field">
+          <label>Raid 2 signup</label>
+          <select id="rhEventB" class="picker"></select>
+        </div>
+        <button class="btn-ghost" onclick="loadSignups()">Load signups</button>
+      </div>
+      <div id="loadedEvents" style="font-size:11px;color:var(--text-dim);margin-top:8px;"></div>
+    </div>
+
+    <div class="toolbar">
+      <div class="field">
+        <label>Group size</label>
+        <div class="stepper">
+          <button onclick="changeGroupSize(-1)">−</button>
+          <span id="countGroup">25</span>
+          <button onclick="changeGroupSize(1)">+</button>
+        </div>
+      </div>
+      <div class="spacer"></div>
+      <button class="btn-primary" onclick="autoAllocate()">Auto-allocate</button>
+      <button class="btn-ghost" onclick="clearGroups()">Clear groups</button>
+      <button class="btn-ghost" onclick="startOver()">Start over</button>
+    </div>
+    <div id="groupsStatus" style="font-size:11.5px;color:var(--text-dim);margin:-4px 0 10px;min-height:15px;"></div>
+
+    <div class="roster-panel">
+      <div id="reserveWrap" style="display:none;margin-bottom:12px;">
+        <div class="reserve-hint">Tentative / Bench — drag them in to fill a gap</div>
+        <div class="roster-pool" id="reservePool"></div>
+      </div>
+      <div class="reserve-hint" style="color:var(--text-dim);">Pool</div>
+      <div class="roster-pool" id="groupPool"></div>
+    </div>
+
+    <div class="group-grid">
+      <div class="group-col">
+        <div class="group-head"><span>Group 1</span><span id="groupCount1">0/25</span></div>
+        <div class="group-tally" id="groupTally1"></div>
+        <div class="roster-pool group-list" id="groupList1"></div>
+      </div>
+      <div class="group-col">
+        <div class="group-head"><span>Group 2</span><span id="groupCount2">0/25</span></div>
+        <div class="group-tally" id="groupTally2"></div>
+        <div class="roster-pool group-list" id="groupList2"></div>
+      </div>
+    </div>
+
+    <footer>Built for raid night — two raids, two groups, nobody double-booked.</footer>
+  </div>
+</div>
+
+<script src="menu.js"></script>
+<script src="groups.js"></script>

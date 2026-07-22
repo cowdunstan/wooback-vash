@@ -23,6 +23,17 @@ board, identity links, loot, and attendance.
 - **`board.html`** — the Lady Vashj assignment board (**officers only**); `app.js`
   + `styles.css` power it. Imports rosters from Raid-Helper, and **saves/loads**
   the whole board (roster + slot counts + assignments) to the backend per raid.
+- **`groups.html`** — **2 group organisation** (**officers only**): the guild runs
+  the same raid twice at different times — one Raid-Helper signup for **mains**, a
+  second for **alts** — so this page loads *both* signups, resolves them against
+  the roster links, and splits them into two 25-man groups by drag-and-drop or one
+  **Auto-allocate** press (balancing tanks / healers / ranged / melee and spreading
+  classes). **One person holds at most one slot per group**: someone signed up to
+  both raids contributes a chip per character they own and takes a slot in each
+  group, never two in the same one — identity comes from `/api/members`, not the
+  character name, and a signup with no roster link is flagged `UNLINKED` on its
+  chip. Someone signed up to only one raid appears as their main. The arrangement
+  is saved in the browser (`localStorage`), not on the server.
 - **`attendance.html`** — **attendance** app (**officers only**): imports a
   Warcraft Logs report and marks its guild-tagged players present. Characters not
   yet linked to a member are created **unclaimed** for the roster to adopt.
@@ -64,8 +75,14 @@ board, identity links, loot, and attendance.
   "anyone with the link" share setting, so the sign-in gate here is for the app's
   flow, not a data barrier.
 - **`menu.js`** — shared session helpers, the `API_BASE` constant, the hamburger
-  menu, and the item-link helpers (`itemLink`, `loadWowhead`, `SLOT_ORDER`,
-  `WOWHEAD_DOMAIN`) every page renders items with.
+  menu, the item-link helpers (`itemLink`, `loadWowhead`, `SLOT_ORDER`,
+  `WOWHEAD_DOMAIN`) every page renders items with, and the **`RH`** module: the
+  Raid-Helper event fetchers (`listEvents`, `fetchEvent`, `mapSignups`), the
+  class/spec tables, the role classifiers (`isTank`/`isHealer`/`isRanged`) and the
+  draggable-chip markup shared by `board.html` and `groups.html`. It is one `RH`
+  object rather than bare globals because `app.js` declares names like
+  `CLASS_COLORS` itself — a global of the same name here would be a duplicate-
+  `const` SyntaxError.
 
 ### Asset caching
 
