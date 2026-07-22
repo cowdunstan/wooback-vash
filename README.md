@@ -121,6 +121,20 @@ board, identity links, loot, and attendance.
   banners each boss inside it, a P2 raid is **one tab per boss** (plus its trash
   tab, plus the shared tier-set tab) and each names the section it belongs to.
 
+  **Tier tokens** get special handling, because a token drops as one item and is
+  redeemed into a class-specific piece: the sheet names the token (`Chestguard of
+  the Forgotten Conqueror`), but the winner wears the piece (`Lightbringer
+  Chestguard`), which is all the gear snapshots see. `TIER_TOKENS` in `loot-prio.js`
+  maps each token to the item ids of every class piece it turns into, so **a raider
+  wearing the upgrade counts as holding the token** — HAS fires, they are struck out
+  and prio moves past them, and they drop from the soft-reserve export. The match is
+  per class and per slot: a paladin holding the Conqueror shoulder is detected by the
+  paladin shoulder piece, not the priest's or a helm. P3 names its tier tokens in
+  full; P2's shared tier-set tab writes them bare under a slot banner (`Tier sets —
+  Helms` → `Vanquished Champion`), so `loot-prio.js` rejoins banner and label into
+  the real item name (`Helm of the Vanquished Champion`) before parsing — otherwise
+  all five slots collapse to one lookup and never resolve to an item id.
+
   **Gargul SR string** turns the plan into a soft-reserve import. A soft reserve
   is flat where the sheet's prio is ordered, so the rule is: **the top tier
   reserves each item, minus anyone who already has it** — and when that empties a

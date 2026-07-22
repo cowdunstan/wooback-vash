@@ -166,6 +166,78 @@ const OPEN_ROLL = /^ms\s*>\s*os$/i;
 // A win inside this window counts toward the "has been winning lately" tally.
 const RECENT_DAYS = 28;
 
+/* ───────────────────────── Tier tokens ─────────────────────────
+   A tier token drops as one item and is redeemed into a class-specific piece: the
+   sheet names the *token* ("Chestguard of the Forgotten Conqueror"), but a raider
+   who won it wears the *piece* ("Lightbringer Chestguard"), which is all the gear
+   snapshots ever see. So the HAS/exclusion check below would never fire on a token
+   — the redeemed piece has a different name and id. This table bridges the two: for
+   each token, the item ids of every class piece it turns into, so wearing the
+   upgrade counts as holding the token (redeemed = HAS).
+
+   Ids are TBC's (Blizzard's static classicann item table), verified against
+   Wowhead. A class's list is every *spec* variant of that slot — a paladin token
+   redeems into the holy, prot and ret helm alike — because any of them means the
+   raider has taken the token. Only the five token slots appear (head, shoulder,
+   chest, hands, legs); the token name carries the slot, so keys are the full item
+   name lowercased, matching how the sheet writes P3 and how P2 is expanded below. */
+const TIER_TOKENS = {
+  'helm of the vanquished champion': { paladin:[29061,29068,29073], rogue:[30146], shaman:[30171,30190] },
+  'helm of the vanquished defender': { warrior:[30115,30120], priest:[29049,29058,30152,30161], druid:[30219,30228,30233] },
+  'helm of the vanquished hero': { hunter:[30141], mage:[30206], warlock:[30212] },
+  'helm of the forgotten conqueror': { paladin:[30987,30988,30989], priest:[31063,31064], warlock:[31051] },
+  'helm of the forgotten protector': { warrior:[30972,30974], hunter:[31003], shaman:[31012,31014,31015] },
+  'helm of the forgotten vanquisher': { rogue:[31027], mage:[31056], druid:[31037,31039,31040] },
+  'pauldrons of the vanquished champion': { paladin:[29064,29070,29075], rogue:[30149], shaman:[30173,30194] },
+  'pauldrons of the vanquished defender': { warrior:[30117,30122], priest:[29054,29060,30154,30163], druid:[30221,30230,30235] },
+  'pauldrons of the vanquished hero': { hunter:[30143], mage:[30210], warlock:[30215] },
+  'pauldrons of the forgotten conqueror': { paladin:[30996,30997,30998], priest:[31069,31070], warlock:[31054] },
+  'pauldrons of the forgotten protector': { warrior:[30979,30980], hunter:[31006], shaman:[31022,31023,31024] },
+  'pauldrons of the forgotten vanquisher': { rogue:[31030], mage:[31059], druid:[31047,31048,31049] },
+  'chestguard of the vanquished champion': { paladin:[29062,29066,29071], rogue:[30144], shaman:[30169,30185] },
+  'chestguard of the vanquished defender': { warrior:[30113,30118], priest:[29050,29056,30150,30159], druid:[30216,30222,30231] },
+  'chestguard of the vanquished hero': { hunter:[30139], mage:[30196], warlock:[30214] },
+  'chestguard of the forgotten conqueror': { paladin:[30990,30991,30992], priest:[31065,31066], warlock:[31052] },
+  'chestguard of the forgotten protector': { warrior:[30975,30976], hunter:[31004], shaman:[31016,31017,31018] },
+  'chestguard of the forgotten vanquisher': { rogue:[31028], mage:[31057], druid:[31041,31042,31043] },
+  'leggings of the vanquished champion': { paladin:[29063,29069,29074], rogue:[30148], shaman:[30172,30192] },
+  'leggings of the vanquished defender': { warrior:[30116,30121], priest:[29053,29059,30153,30162], druid:[30220,30229,30234] },
+  'leggings of the vanquished hero': { hunter:[30142], mage:[30207], warlock:[30213] },
+  'leggings of the forgotten conqueror': { paladin:[30993,30994,30995], priest:[31067,31068], warlock:[31053] },
+  'leggings of the forgotten protector': { warrior:[30977,30978], hunter:[31005], shaman:[31019,31020,31021] },
+  'leggings of the forgotten vanquisher': { rogue:[31029], mage:[31058], druid:[31044,31045,31046] },
+  'gloves of the vanquished champion': { paladin:[29065,29067,29072], rogue:[30145], shaman:[30170,30189] },
+  'gloves of the vanquished defender': { warrior:[30114,30119], priest:[29055,29057,30151,30160], druid:[30217,30223,30232] },
+  'gloves of the vanquished hero': { hunter:[30140], mage:[30205], warlock:[30211] },
+  'gloves of the forgotten conqueror': { paladin:[30982,30983,30985], priest:[31060,31061], warlock:[31050] },
+  'gloves of the forgotten protector': { warrior:[30969,30970], hunter:[31001], shaman:[31007,31008,31011] },
+  'gloves of the forgotten vanquisher': { rogue:[31026], mage:[31055], druid:[31032,31034,31035] }
+};
+
+// The token map for an item name, or null. Item names arrive already lowercased for
+// P3; P2 is expanded to the same full name before it is parsed (see parseRaidTab).
+function tierToken(name){ return TIER_TOKENS[String(name || '').toLowerCase()] || null; }
+
+/* P2's shared Tier sets tab names its tokens *bare* under a slot banner — section
+   "Tier sets — Helms", item just "Vanquished Champion" — so the slot noun that
+   would make it a real item name lives only in the banner. This maps the banner
+   word to the noun the token item name uses, so the five slots stop collapsing to
+   one lookup and each expands to its canonical name. The noun is the same across
+   T5 and T6. */
+const TIER_SLOT_NOUNS = {
+  'helms':'Helm', 'shoulder':'Pauldrons', 'chest':'Chestguard',
+  'pants':'Leggings', 'gloves':'Gloves'
+};
+
+// The canonical token item name for a P2 slot banner + token label, when the two
+// name a token the table knows; null otherwise, so only real tokens are rewritten.
+function tierItemName(slotWord, label){
+  const noun = TIER_SLOT_NOUNS[String(slotWord || '').toLowerCase()];
+  if(!noun) return null;
+  const full = `${noun} of the ${String(label || '').trim()}`;
+  return tierToken(full) ? full : null;
+}
+
 let picked = { eventId:'', eventTitle:'', raid:RAID_TABS[0].key };
 let candidates = [];      // everyone signed up, as { name, cls, spec, ... }
 let sections = [];        // the parsed sheet: [{ name, items:[…] }]
@@ -458,6 +530,10 @@ function parseRaidTab(grid, forcedSection){
   const legend = legendColumn(rows);
   let section = forcedSection ? { name:forcedSection, items:[] } : null;
   let lastItem = null;
+  // The current slot banner, when this is P2's Tier sets tab — the noun a bare token
+  // row ("Vanquished Champion") needs to become a real item name. Only set under a
+  // forcedSection, which is the only place tokens are written slot-first.
+  let slotWord = null;
   if(section) out.push(section);
 
   rows.forEach(row => {
@@ -481,6 +557,7 @@ function parseRaidTab(grid, forcedSection){
       section = { name, items:[] };
       out.push(section);
       lastItem = null;
+      slotWord = forcedSection ? a : null;
       return;
     }
 
@@ -500,7 +577,12 @@ function parseRaidTab(grid, forcedSection){
 
     if(!section){ section = { name:'Loot', items:[] }; out.push(section); }
 
-    const item = { name:a, tiers:[], openRoll:false, openTail:false, notes:[] };
+    // P2's Tier sets tab writes the token slot-first: banner "Helms", row
+    // "Vanquished Champion". Rejoin them into the real item name ("Helm of the
+    // Vanquished Champion") so WON, the id resolver and the redeemed-piece HAS all
+    // key on a token they know, and the five slots stop collapsing to one lookup.
+    const item = { name: (slotWord && tierItemName(slotWord, a)) || a,
+                   tiers:[], openRoll:false, openTail:false, notes:[] };
 
     if(OPEN_ROLL.test(b)){
       item.openRoll = true;
@@ -625,6 +707,21 @@ function annotate(itemRows, loot){
   const exact = new Map();
   rows.forEach(r => exact.set(String(r.name || '').toLowerCase(), r));
 
+  // Every item id each character is wearing, from the same gear rows. Tier tokens
+  // are held as their *redeemed* piece, whose name never matches the token — so the
+  // token's HAS is decided by id against this map, not by the name lookup above.
+  const wornByChar = new Map();
+  rows.forEach(r => {
+    const id = Number(r.id);
+    if(!id) return;
+    (r.equipped || []).forEach(e => {
+      const key = String(e.name || '').toLowerCase();
+      let ids = wornByChar.get(key);
+      if(!ids){ ids = new Set(); wornByChar.set(key, ids); }
+      ids.add(id);
+    });
+  });
+
   return function lookup(itemName){
     const lower = String(itemName).toLowerCase();
     const row = exact.get(lower) ||
@@ -634,6 +731,18 @@ function annotate(itemRows, loot){
       (row.equipped || []).forEach(e => {
         const c = byName.get(String(e.name || '').toLowerCase());
         if(c) c.has.add(lower);
+      });
+    }
+    // A tier token: anyone wearing a piece it redeems into has already taken it, so
+    // mark HAS under the token's own key. Class-keyed — a paladin holding the
+    // Conqueror shoulder wears the paladin piece, not the priest's or warlock's.
+    const tok = tierToken(lower);
+    if(tok){
+      candidates.forEach(c => {
+        const ids = tok[c.cls];
+        if(!ids) return;
+        const worn = wornByChar.get(c.name.toLowerCase());
+        if(worn && ids.some(id => worn.has(id))) c.has.add(lower);
       });
     }
     return row || null;
