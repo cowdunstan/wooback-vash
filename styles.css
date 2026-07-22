@@ -355,3 +355,72 @@
   .item-check-who{color:var(--text-dim);font-size:10.5px;margin-left:4px;}
   .item-check-others{color:var(--text-dim);font-size:11px;font-style:italic;}
   .stag.item{background:rgba(105,204,240,.18);color:#69ccf0;}
+
+  /* ── Loot prio (loot-prio.html) ──────────────────────────────────────────
+     One block per boss, one row per item, and inside it the sheet's prio chain
+     laid out inline: rank, spec token, then the characters signed up who match.
+     Everything wraps — a long chain on a phone must run onto the next line
+     rather than push the page sideways. */
+  .prio-boss{
+    background:var(--panel);border:1px solid var(--panel-line);
+    border-radius:10px;padding:14px 16px;margin-bottom:14px;
+  }
+  .prio-boss h2{
+    font-family:'Cinzel',serif;font-size:16px;font-weight:700;color:var(--teal);
+    margin:0 0 10px;letter-spacing:.4px;
+  }
+  .prio-item{padding:8px 0;border-top:1px solid rgba(31,74,63,.5);}
+  .prio-boss .prio-item:first-of-type{border-top:none;padding-top:0;}
+  .prio-item.is-empty{opacity:.5;}
+  .prio-item-name{font-size:13.5px;font-weight:600;margin-bottom:5px;}
+  .prio-tiers{display:flex;flex-wrap:wrap;align-items:center;gap:5px;font-size:12px;}
+  .prio-tier{display:inline-flex;flex-wrap:wrap;align-items:center;gap:5px;}
+  .prio-rank{
+    background:rgba(0,0,0,.35);color:var(--teal);border-radius:4px;
+    padding:1px 5px;font-size:10px;font-weight:700;
+  }
+  .prio-token{
+    font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;
+    color:var(--text-dim);
+  }
+  .prio-gt{color:var(--teal-dim);font-weight:700;padding:0 2px;}
+  .prio-eq{color:var(--text-dim);font-weight:700;padding:0 2px;}
+  .prio-amb{
+    color:var(--amber);font-weight:700;font-size:10px;margin-left:2px;cursor:help;
+  }
+  .prio-none{color:var(--text-dim);font-size:11px;font-style:italic;}
+  .prio-open{color:var(--amber);font-size:11.5px;}
+  .prio-name{
+    display:inline-flex;align-items:center;gap:4px;
+    border-left:3px solid var(--class-color, var(--teal));
+    background:#132824;border-radius:4px;padding:2px 7px;
+    font-size:12px;font-weight:500;color:var(--text);text-decoration:none;
+  }
+  .prio-name:hover{background:#1a3630;}
+  .prio-note{color:var(--text-dim);font-size:11px;margin-top:5px;font-style:italic;}
+  .prio-check{
+    display:inline-flex;align-items:center;gap:6px;
+    font-size:12px;color:var(--text-dim);cursor:pointer;
+  }
+  /* Already has the item, so prio has moved past them and they are left out of
+     the soft-reserve export. Struck through rather than hidden — an officer still
+     wants to see who was skipped and why. */
+  .prio-name.is-had{opacity:.45;text-decoration:line-through;border-left-color:var(--text-dim);}
+  .prio-name.is-had:hover{opacity:.7;}
+  /* The tier that ends up reserving the item in the Gargul export. */
+  .prio-tier.is-reserving .prio-rank{background:var(--teal-dim);color:#04140f;}
+
+  .sr-text{
+    width:100%;background:#0a1815;border:1px solid var(--panel-line);color:var(--text-dim);
+    border-radius:6px;padding:8px 10px;font-family:ui-monospace,Consolas,monospace;
+    font-size:11px;resize:vertical;word-break:break-all;margin-top:8px;
+  }
+  .sr-actions{display:flex;gap:10px;align-items:center;margin-top:8px;}
+  #srExport label{
+    display:block;font-size:10.5px;text-transform:uppercase;letter-spacing:1.2px;
+    color:var(--text-dim);margin-bottom:5px;font-weight:600;
+  }
+
+  .stag.has{background:rgba(46,230,171,.18);color:var(--teal);}
+  .stag.won{background:rgba(168,117,232,.2);color:#c9aef5;}
+  .stag.recent{background:rgba(0,0,0,.35);color:var(--text-dim);}

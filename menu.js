@@ -381,6 +381,7 @@ const NAV_LINKS = [
   { href:'items.html',      label:'Items' },
   { href:'loot-history.html', label:'Loot history' },
   { href:'loot-stats.html', label:'Loot stats' },
+  { href:'loot-prio.html',  label:'Loot prio',       officer:true },
   { href:'sheet.html',      label:'Loot sheet' }
 ];
 

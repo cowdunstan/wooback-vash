@@ -82,6 +82,50 @@ board, identity links, loot, and attendance.
   (`SHEET_EMBED_URL`), open to any signed-in tier. Reads the live sheet via its
   "anyone with the link" share setting, so the sign-in gate here is for the app's
   flow, not a data barrier.
+- **`loot-prio.html`** — **loot prio** (**officers only**): the join between the
+  loot sheet and who is actually raiding. Pick one Raid-Helper signup and a raid
+  (**Black Temple** or **Mount Hyjal** — the sheet is the P3 one and has no SSC/TK
+  tabs) and every boss's items come back with the characters signed up that hold
+  prio, in the sheet's own order. The sheet writes prio as **spec tokens**
+  (`Cuffs of Devastation → Arcane > Balance > Ele > Destro`); `loot-prio.js` maps
+  those to specs (`SPEC_TOKENS`) and matches them against the spec each raider
+  signed up with, falling back to the spec a Warcraft Logs import last saw for
+  that character.
+
+  Two of the guild's tokens are ambiguous as text — `Resto` is the druid *or* the
+  shaman, `Holy` the paladin *or* the priest — and the sheet settles them with
+  **cell colour**: every token is filled with that class's colour. So the page
+  reads the tab's **embedded view** (`/sheet/loot`, which keeps the fills) rather
+  than the CSV export (which doesn't), maps each fill to a class
+  (`SHEET_CLASS_FILLS`, nearest-colour so a shade off still lands) and narrows the
+  token to it. That is what lets *Bracers of Martydom* (`Holy` in white → priests)
+  and *Howling Wind Bracers* (`Resto` in blue → the shaman) come out as different
+  people, and why a repeated chain like `Holy > Resto > Holy > Resto` reads
+  correctly as pally, resto sham, priest, resto druid. If the embedded view ever
+  stops parsing the page falls back to the CSV, says so in its status line, and
+  marks the tokens it can no longer separate with a `?`. A token the table doesn't
+  know is reported rather than silently dropped.
+  `MS > OS` items are shown as open to everyone. Each candidate carries **HAS**
+  (already wearing it, from the gear snapshots), **WON** (already awarded it) and
+  a `×N` tally of their wins in the last 28 days, so a tie inside a tier has a
+  tiebreaker. **Copy as text** dumps the whole plan for pasting into Discord.
+  Which tab is which raid is `RAID_TABS` in `loot-prio.js` — one line per raid.
+
+  **Gargul SR string** turns the plan into a soft-reserve import. A soft reserve
+  is flat where the sheet's prio is ordered, so the rule is: **the top tier
+  reserves each item, minus anyone who already has it** — and when that empties a
+  whole tier, prio drops to the next one down. The page shows the same walk it
+  exports: someone skipped is struck through, and the tier that ended up
+  reserving has its rank badge lit. The sheet's spec token rides along as each
+  player's Gargul note, so the addon can say *why* they hold it.
+
+  The string is `base64(zlib(JSON))` — the current format from Gargul's
+  `Classes/SoftRes.lua` (`importGargulData`), not the CSV one it warns is
+  deprecated. `CompressionStream('deflate')` supplies the zlib wrapper
+  `LibDeflate:DecompressZlib` expects. Item **ids** come from
+  `POST /api/items/resolve`, because the sheet carries names only. `plusOnes` is
+  0 for everyone since we track none — Gargul asks before overwriting plus-ones
+  it already has, and the page says to answer **No**.
 - **`menu.js`** — shared session helpers, the `API_BASE` constant, the hamburger
   menu, the item-link helpers (`itemLink`, `loadWowhead`, `SLOT_ORDER`,
   `WOWHEAD_DOMAIN`) every page renders items with, and the **`RH`** module: the
@@ -154,6 +198,29 @@ A .NET 8 Minimal-API app (EF Core + Npgsql). Routes:
   the item (name, icon, quality, item level), who has it equipped in their latest
   gear snapshot, how often it dropped, and every award with its rolls. An id also
   picks up hand-typed awards that carry only the name, so both reach one page.
+- **Loot-sheet proxy** — `GET /sheet/loot?gid=`, officer-gated. Returns one tab of
+  the guild's Google loot sheet (cached 10 min) for `loot-prio.html`.
+  `?format=html` (the default) is the embedded view, which keeps the cell colours
+  the sheet encodes class in; `?format=csv` is the plain export, ~9 KB against
+  ~140 KB but with no formatting at all. There
+  is no credential here — the doc is link-shared, so both answer an
+  anonymous GET; the proxy exists only because Google sends no CORS header. The
+  document id is `LootSheet:DocId` in `appsettings.json`, the same doc
+  `SHEET_EMBED_URL` in `sheet.html` embeds — **change both together**, and keep
+  its General access on "Anyone with the link → Viewer" or both pages break.
+- **Item-name lookup** — `POST /api/items/resolve` `{ names: [...] }`, officer-gated,
+  max 500 names. Returns `{ resolved: { name: id }, unresolved: [...] }`. Bridges the
+  loot sheet (names) to a Gargul soft reserve (ids) via Blizzard's item search on
+  the **static** classicann namespace (`Blizzard:StaticNamespace`) — TBC's item
+  table, so "Cuffs of Devastation" is 30870 and not the retail item that reused the
+  name. That search is fuzzy, so results are re-matched against the name asked for:
+  exact, then one-typo (the sheet has a few — `Bracers of Martydom`,
+  `Antonida's Aegis`, `Mymidon's Treads`), then again with trailing words dropped,
+  which resolves annotated rows like `Shroud of the Highborne Healer Prio`. The
+  Warglaives are the one place the sheet distinguishes two items sharing a name,
+  as `(MH)` / `(OH)`; those are picked apart by id. Ids are cached for the process
+  lifetime — an item's id never changes. Currently 203 of the sheet's 209 names
+  resolve; the rest are reported, never guessed.
 - **Health** — `/healthz` (liveness), `/readyz` (DB reachability + error detail).
 
 Non-secret config (Discord client id, guild id, role ids, WCL guild identity)

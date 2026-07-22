@@ -13,6 +13,10 @@ namespace WoobackVash.Api.Proxy;
 ///  • /wcl/reports   Warcraft Logs report list — any signed-in tier (logs are
 ///                   public). ?fresh=1 forces a live refresh (officers only).
 ///  • /wcl/ratelimit Warcraft Logs points budget — officer-only diagnostics.
+///  • /sheet/loot    One tab of the guild Google loot sheet — officer-only. Not a
+///                   credential proxy (the doc is link-shared); it exists because
+///                   Google sends no CORS header. ?format=html keeps the cell
+///                   colours the sheet encodes class in, ?format=csv does not.
 /// </summary>
 public static class ProxyEndpoints
 {
@@ -90,6 +94,40 @@ public static class ProxyEndpoints
 
             var (status, body) = await wcl.GetRateLimitAsync();
             return Results.Text(body, "application/json", statusCode: status);
+        });
+
+        // One tab of the guild loot sheet — officer-only, because it feeds the
+        // loot-prio page, which is officer work. The document id lives in config
+        // and is never client-supplied; only the tab (gid) is, and it must be
+        // digits, so the URL this builds can't be steered anywhere else.
+        //
+        // ?format=html (the default) returns the embedded view, which keeps the
+        // cell fills the sheet uses to say which class a spec token means;
+        // ?format=csv returns the plain export, the fallback that costs only that
+        // colour information.
+        app.MapGet("/sheet/loot", async (
+            HttpContext ctx,
+            SessionTokenService tokens,
+            LootSheetService sheet) =>
+        {
+            var (_, error) = ctx.RequireOfficer(tokens);
+            if (error is not null) return error;
+
+            var gid = ctx.Request.Query["gid"].ToString();
+            if (string.IsNullOrEmpty(gid) || !gid.All(char.IsAsciiDigit))
+                return Results.Json(new { error = "bad_request", detail = "A numeric gid is required." },
+                                    statusCode: 400);
+
+            var format = ctx.Request.Query["format"].ToString();
+            if (format.Length > 0 && format != "html" && format != "csv")
+                return Results.Json(new { error = "bad_request", detail = "format must be html or csv." },
+                                    statusCode: 400);
+            var html = format != "csv";
+
+            var (status, body, err) = await sheet.GetTabAsync(gid, html);
+            if (body is null)
+                return Results.Json(new { error = "upstream", detail = err }, statusCode: status);
+            return Results.Text(body, html ? "text/html" : "text/csv", statusCode: status);
         });
     }
 }

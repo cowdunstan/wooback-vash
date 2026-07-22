@@ -69,7 +69,10 @@
    step. It renders Google's live read-only view (colors, merged banners, tabs).
    Requirement: the sheet's General access must stay "Anyone with the link →
    Viewer" so members see it without a Google login; if you later restrict it to
-   specific accounts, this frame becomes Google-account gated instead. */
+   specific accounts, this frame becomes Google-account gated instead — and the
+   loot-prio page, which reads the same doc as CSV through the backend, stops
+   working too. The document id is repeated as LootSheet:DocId in the backend's
+   appsettings.json; change both together. */
 const SHEET_EMBED_URL = 'https://docs.google.com/spreadsheets/d/18MHJQi6vz9Ax2yPwreGhnKc0SwvC_xIy2iCBGGgwbb4/preview';
 
 (function(){

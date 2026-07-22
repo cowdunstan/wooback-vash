@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using WoobackVash.Api.Auth;
 using WoobackVash.Api.Data;
 using WoobackVash.Api.Models;
+using WoobackVash.Api.Services;
 
 namespace WoobackVash.Api.Api;
 
@@ -201,7 +202,37 @@ public static class ItemEndpoints
 
             return Results.Json(rows);
         });
+
+        // Item names → item ids, for the loot-prio page's Gargul soft-reserve export
+        // (the sheet has names, a soft reserve is keyed by id). Officer-gated: it is
+        // an officer feature and it spends the guild's Blizzard API budget.
+        //
+        // POST rather than GET because a raid tab is ~150 names, which is more than
+        // belongs in a query string. Names that can't be resolved come back listed
+        // so the page can say which ones, rather than dropping them quietly.
+        app.MapPost("/api/items/resolve", async (
+            HttpContext ctx, SessionTokenService tokens, BlizzardService blizzard, ResolveInput input) =>
+        {
+            var (_, error) = ctx.RequireOfficer(tokens);
+            if (error is not null) return error;
+
+            if (input?.Names is null || input.Names.Count == 0)
+                return Results.Json(new { error = "bad_request", detail = "No item names given." },
+                                    statusCode: 400);
+            if (input.Names.Count > 500)
+                return Results.Json(new { error = "bad_request", detail = "Too many names in one call (max 500)." },
+                                    statusCode: 400);
+
+            var (status, ids, unresolved, err) = await blizzard.ResolveItemIdsAsync(input.Names);
+            if (ids is null)
+                return Results.Json(new { error = "upstream", detail = err }, statusCode: status);
+
+            return Results.Json(new { resolved = ids, unresolved });
+        });
     }
+
+    /// <summary>Body of POST /api/items/resolve.</summary>
+    public record ResolveInput(List<string> Names);
 
     /// <summary>One item as it is assembled across every character wearing it.</summary>
     private sealed class ItemRow
