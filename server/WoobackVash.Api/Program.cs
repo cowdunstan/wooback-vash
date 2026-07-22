@@ -37,6 +37,10 @@ builder.Services.Configure<RaidHelperOptions>(builder.Configuration.GetSection(R
 builder.Services.Configure<WarcraftLogsOptions>(builder.Configuration.GetSection(WarcraftLogsOptions.SectionName));
 builder.Services.AddSingleton<WarcraftLogsService>();
 
+// The guild Google loot sheet, read as CSV for the loot-prio page.
+builder.Services.Configure<LootSheetOptions>(builder.Configuration.GetSection(LootSheetOptions.SectionName));
+builder.Services.AddSingleton<LootSheetService>();
+
 // Blizzard Game Data API: the guild-roster sync behind the members page.
 builder.Services.Configure<BlizzardOptions>(builder.Configuration.GetSection(BlizzardOptions.SectionName));
 builder.Services.AddSingleton<BlizzardService>();

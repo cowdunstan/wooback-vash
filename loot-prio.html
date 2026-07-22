@@ -1,0 +1,96 @@
+<meta charset="utf-8">
+<script>
+/* Officer gate. Same as groups.html: captures a session handed back by the auth
+   backend (loot-prio.html#session=…), bounces to the landing page with no
+   unexpired session and to home with a non-officer one. The signature is what
+   actually enforces this — every call the page makes is officer-gated server-side. */
+(function(){
+  var m = location.hash.match(/(?:^#|&)session=([^&]+)/);
+  if(m){
+    try{ localStorage.setItem('vashj_session', decodeURIComponent(m[1])); }catch(e){}
+    history.replaceState(null, '', location.pathname + location.search);
+  }
+  function payload(tok){
+    if(!tok) return null;
+    try{
+      var p = tok.split('.')[0].replace(/-/g,'+').replace(/_/g,'/');
+      while(p.length % 4) p += '=';
+      return JSON.parse(atob(p));
+    }catch(e){ return null; }
+  }
+  var tok = null;
+  try{ tok = localStorage.getItem('vashj_session'); }catch(e){}
+  var pl = payload(tok);
+  if(!pl || !pl.exp || pl.exp <= Math.floor(Date.now()/1000)){
+    try{ localStorage.removeItem('vashj_session'); }catch(e){}
+    location.replace('index.html');
+  } else if(!pl.officer){
+    location.replace('home.html');
+  }
+})();
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+
+<div class="app">
+  <div class="wrap">
+    <div class="authbar">
+      <span class="authbar-left">
+        <div class="nav">
+          <button class="hamburger" id="navToggle" aria-label="Menu" aria-expanded="false" aria-controls="navDrawer">
+            <span></span><span></span><span></span>
+          </button>
+          <nav class="nav-drawer" id="navDrawer"></nav>
+        </div>
+        <span class="eyebrow">Raid night</span>
+      </span>
+      <span class="authbar-right">
+        <span id="authWho" class="auth-who"></span>
+        <button class="btn-ghost" onclick="logout()">Sign out</button>
+      </span>
+    </div>
+    <h1>Loot prio</h1>
+    <p class="subtitle">Pick tonight’s signup and the raid, and the guild loot sheet turns into a per-boss prio list: for every item, the characters signed up that hold priority, in the sheet’s own order. Pills flag anyone already wearing it, anyone who has won it before, and how much loot they’ve taken lately.</p>
+
+    <div class="roster-panel">
+      <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
+        <button class="btn-primary" onclick="loadEvents()">Load events</button>
+        <span style="font-size:11px;color:var(--text-dim);">Lists this server's recent and upcoming Raid-Helper events.</span>
+      </div>
+      <div id="rhEventPickRow" style="display:none;flex-wrap:wrap;gap:10px;align-items:flex-end;margin-top:10px;">
+        <div class="field">
+          <label>Signup</label>
+          <select id="rhEvent" class="picker"></select>
+        </div>
+        <div class="field">
+          <label>Raid</label>
+          <select id="raidPick" class="picker"></select>
+        </div>
+        <button class="btn-ghost" onclick="build()">Build prio</button>
+      </div>
+      <div id="prioStatus" style="font-size:11.5px;color:var(--text-dim);margin-top:8px;min-height:15px;"></div>
+    </div>
+
+    <div class="toolbar" id="prioToolbar" style="display:none;">
+      <div class="field">
+        <label>Showing</label>
+        <span id="prioHead" style="font-size:13.5px;font-weight:600;"></span>
+      </div>
+      <div class="spacer"></div>
+      <label class="prio-check"><input type="checkbox" id="hideEmpty" checked onchange="toggleHideEmpty(this)"> Hide items nobody wants</label>
+      <button class="btn-primary" onclick="copyGargulSR()">Gargul SR string</button>
+      <button class="btn-ghost" onclick="copyText()">Copy as text</button>
+      <button class="btn-ghost" onclick="startOver()">Start over</button>
+    </div>
+    <div id="srExport" class="roster-panel" style="display:none;"></div>
+    <div id="prioHiddenNote" style="font-size:11.5px;color:var(--text-dim);margin:-6px 0 10px;"></div>
+
+    <div id="prioResult"></div>
+
+    <footer>Prio comes from the guild loot sheet — edits happen there, not here.</footer>
+  </div>
+</div>
+
+<script src="menu.js"></script>
+<script src="loot-prio.js"></script>

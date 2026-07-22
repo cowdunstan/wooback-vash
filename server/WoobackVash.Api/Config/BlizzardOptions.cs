@@ -14,6 +14,13 @@ public class BlizzardOptions
     public string OAuthUrl { get; set; } = "https://oauth.battle.net/token";
     public string ApiHost { get; set; } = "https://us.api.blizzard.com";
     public string Namespace { get; set; } = "profile-classicann-us";
+
+    /// <summary>Namespace for game data rather than a character/guild profile — item
+    /// names and ids. Same expansion, "static" instead of "profile": on classicann this
+    /// is TBC (2.5.x), which is what makes an item search return Black Temple loot and
+    /// not the retail item that reused the name.</summary>
+    public string StaticNamespace { get; set; } = "static-classicann-us";
+
     public string Locale { get; set; } = "en_US";
 
     public string ClientId { get; set; } = "";
