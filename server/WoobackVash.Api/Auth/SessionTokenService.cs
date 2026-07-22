@@ -9,9 +9,11 @@ namespace WoobackVash.Api.Auth;
 
 /// <summary>
 /// The signed-in session, encoded into the token the frontend stores.
-/// Property names/shape match the old Worker payload exactly:
+/// Property names/shape match the old Worker payload:
 /// <c>{ uid, name, officer, exp }</c>. The pages decode this client-side and read
-/// <c>exp</c> / <c>officer</c>, so the shape must not drift.
+/// <c>exp</c> / <c>officer</c>, so those must not drift. <c>iat</c> is additive —
+/// it records the original Discord sign-in so renewals can be capped; tokens
+/// minted before it existed simply carry 0.
 /// </summary>
 public record SessionPayload
 {
@@ -19,6 +21,7 @@ public record SessionPayload
     [JsonPropertyName("name")] public string Name { get; init; } = "";
     [JsonPropertyName("officer")] public bool Officer { get; init; }
     [JsonPropertyName("exp")] public long Exp { get; init; }
+    [JsonPropertyName("iat")] public long Iat { get; init; }
 }
 
 /// <summary>
@@ -38,25 +41,47 @@ public class SessionTokenService
 
     private readonly byte[] _secret;
     private readonly int _ttlSeconds;
+    private readonly int _maxLifetimeSeconds;
 
     public SessionTokenService(IOptions<SessionSigningOptions> options)
     {
         _secret = Encoding.UTF8.GetBytes(options.Value.Secret ?? "");
         _ttlSeconds = options.Value.TtlSeconds;
+        _maxLifetimeSeconds = options.Value.MaxLifetimeSeconds;
     }
 
     /// <summary>Seconds since the Unix epoch, now.</summary>
     public static long NowUnix() => DateTimeOffset.UtcNow.ToUnixTimeSeconds();
 
-    /// <summary>Builds a session for a user, stamping exp = now + TTL.</summary>
+    /// <summary>Builds a session for a user, stamping iat = now and exp = now + TTL.</summary>
     public string Sign(string uid, string name, bool officer)
-        => Sign(new SessionPayload
+    {
+        var now = NowUnix();
+        return Sign(new SessionPayload
         {
             Uid = uid,
             Name = name,
             Officer = officer,
-            Exp = NowUnix() + _ttlSeconds
+            Exp = now + _ttlSeconds,
+            Iat = now
         });
+    }
+
+    /// <summary>
+    /// Slides an existing session forward: same uid/name/officer and the original
+    /// <c>iat</c>, a fresh <c>exp</c>. Returns null once the session is older than
+    /// MaxLifetimeSeconds — past that the user goes back through Discord so their
+    /// roles are re-read. Tokens minted before <c>iat</c> existed (iat = 0) are
+    /// grandfathered and get stamped with the current time on their first renewal.
+    /// </summary>
+    public string? Renew(SessionPayload current)
+    {
+        var now = NowUnix();
+        var iat = current.Iat > 0 ? current.Iat : now;
+        if (now - iat > _maxLifetimeSeconds) return null;
+
+        return Sign(current with { Exp = now + _ttlSeconds, Iat = iat });
+    }
 
     public string Sign(SessionPayload payload)
     {

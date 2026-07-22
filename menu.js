@@ -41,6 +41,33 @@ function logout(){
   location.replace('index.html');
 }
 
+/* Sliding renewal. A token expires on a fixed window, so without this an active
+   raider gets bounced back to Discord the moment `exp` passes. Once a session is
+   past the halfway point of its own window we quietly trade it for a fresh one
+   on page load. The API caps how long a session can be renewed for; a failure
+   here is silent — the existing token still works until it expires. */
+function refreshSessionIfStale(){
+  const p = sessionPayload();
+  if(!p || !p.exp) return;
+  const now = Math.floor(Date.now() / 1000);
+  if(p.exp <= now) return;
+  // Halfway between issue and expiry. Tokens minted before `iat` existed have no
+  // issue time, so fall back to "renew inside the last day".
+  const halfway = p.iat ? p.iat + (p.exp - p.iat) / 2 : p.exp - 86400;
+  if(now < halfway) return;
+
+  fetch(API_BASE + '/auth/refresh', {
+    method: 'POST',
+    headers: { 'Authorization': 'Bearer ' + sessionToken() }
+  }).then(function(res){
+    return res.ok ? res.json() : null;
+  }).then(function(data){
+    if(data && data.session){
+      try{ localStorage.setItem('vashj_session', data.session); }catch(e){}
+    }
+  }).catch(function(){});
+}
+
 /* ───────────────────────── Shared API base ─────────────────────────
    Every page talks to the same .NET backend (server/WoobackVash.Api): Discord
    OAuth, board save/load, loot, attendance, and the Warcraft-Logs / Raid-Helper
@@ -161,6 +188,9 @@ function renderNav(drawer){
 
     // Build the nav from the shared list before anything reads its links.
     if(drawer) renderNav(drawer);
+
+    // Keep a long-lived session alive without a trip back to Discord.
+    refreshSessionIfStale();
 
     // Show who's signed in, wherever a page exposes the slot.
     const who = document.getElementById('authWho');

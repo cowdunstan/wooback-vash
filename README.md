@@ -94,9 +94,16 @@ Each page points at the backend through a single constant: `AUTH_BASE`
 A .NET 8 Minimal-API app (EF Core + Npgsql). Routes:
 
 - **Discord OAuth** — `/auth/login`, `/auth/callback`. Reads the signed-in user's
-  guild roles and issues a short-lived HMAC-signed session token whose `officer`
-  flag records their tier. The token format is `base64url(payload).base64url(HMAC)`
-  with payload `{ uid, name, officer, exp }`; pages decode it client-side.
+  guild roles and issues an HMAC-signed session token whose `officer` flag records
+  their tier. The token format is `base64url(payload).base64url(HMAC)` with payload
+  `{ uid, name, officer, exp, iat }`; pages decode it client-side.
+- **Session renewal** — `POST /auth/refresh`, any valid session. Returns a token
+  with a fresh `exp` (same uid/name/officer, original `iat`), so an active raider
+  is never bounced back to Discord. `menu.js` calls it on page load once a session
+  is past the halfway point of its window. Sessions last `Session:TtlSeconds`
+  (7 days) and can be renewed until `Session:MaxLifetimeSeconds` (30 days) after
+  the original sign-in — that cap is what bounds how stale the `officer` flag can
+  get, since roles are only re-read at login.
 - **Raid-Helper proxy** — `GET /v4/*`, officer-gated. The Raid-Helper token is
   attached server-side (`RaidHelper__Token`) and never reaches the browser.
 - **Warcraft Logs proxy** — `GET /wcl/reports`, any valid session (logs are
@@ -142,6 +149,12 @@ lives in `server/WoobackVash.Api/appsettings.json`.
    backend rejects officer routes with no session (`401`) or a non-officer session
    (`403`). Client-side checks only decide what to *show*; the real enforcement is
    the backend refusing data without a valid signature.
+5. On each page load a session past its halfway point is swapped for a fresh one
+   via `POST /auth/refresh`, so steps 1–3 only repeat after 30 days of renewals
+   (or a week away from the site).
+
+Because tokens are signed with `Session__Secret`, changing that value logs
+everybody out at once — keep it stable across deploys.
 
 ## Setup
 
