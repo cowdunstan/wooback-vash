@@ -312,7 +312,13 @@ const RH = (function(){
       if(seen.has(key)) return;                  // de-dupe by name, first signup wins
       seen.add(key);
 
-      out.push({ id:nextId(), name, cls, role, spec, num:null, status });
+      // The Discord user id of whoever signed up. Worth carrying: it identifies
+      // the raider outright, where a character name only matches if the roster
+      // already knows that character. `id` on a signup is the signup's own id,
+      // not a user id, so it is never a fallback here.
+      const userId = String(s.userId || s.userid || '').trim();
+
+      out.push({ id:nextId(), userId, name, cls, role, spec, num:null, status });
     });
     return out;
   }

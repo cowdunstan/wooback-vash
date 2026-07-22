@@ -30,9 +30,13 @@ board, identity links, loot, and attendance.
   **Auto-allocate** press (balancing tanks / healers / ranged / melee and spreading
   classes). **One person holds at most one slot per group**: someone signed up to
   both raids contributes a chip per character they own and takes a slot in each
-  group, never two in the same one — identity comes from `/api/members`, not the
-  character name, and a signup with no roster link is flagged `UNLINKED` on its
-  chip. Someone signed up to only one raid appears as their main. An **item
+  group, never two in the same one. Identity is the **Discord user id** the
+  Raid-Helper signup carries, matched against `Member.discordUserId` — so a
+  raider is recognised even when they sign up on an alt the roster has never
+  seen; a character-name match against `/api/members` is the fallback for a
+  signup with no user id. A signup that matches no member is flagged `UNLINKED`
+  on its chip, though its Discord id still pairs that person's two signups so
+  they can't be double-booked either. Someone signed up to only one raid appears as their main. An **item
   check** answers "who has Dragonspine Trophy, and which group are they in?":
   type any comma-separated item names and every wearer is pilled on their chip
   and listed by group, read from each character's latest gear snapshot via
