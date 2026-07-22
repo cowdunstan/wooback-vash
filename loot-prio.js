@@ -608,7 +608,16 @@ function parseRaidTab(grid, forcedSection){
    user id first (that is who signed up, full stop), character name second (which
    only matches when the roster already knows the character). The roster fills in
    whatever the signup left blank — the class and spec a Warcraft Logs import last
-   saw for that character. */
+   saw for that character.
+
+   The name Raid-Helper carries isn't taken as gospel. When it matches a roster
+   character outright, that character is the one holding prio. When it doesn't —
+   a Discord nick, an alt spelled a shade differently, a bare "Warrior" — but the
+   Discord id still finds the member, we pick the character of theirs whose class
+   matches what they signed up as: that is the character that would actually take
+   the loot, and pinning it to a real character is what makes the HAS / WON / recent
+   annotations (all keyed on character name) land. The main breaks a tie when more
+   than one character of that class is on the roster. */
 
 function buildCandidates(signups, members){
   const byDiscord = new Map();
@@ -618,20 +627,37 @@ function buildCandidates(signups, members){
     (m.characters || []).forEach(ch => byName.set(String(ch.name || '').toLowerCase(), m));
   });
 
-  let unlinked = 0, noSpec = 0;
+  let unlinked = 0, noSpec = 0, byClass = 0;
 
   candidates = signups.map(s => {
     const member = (s.userId ? byDiscord.get(s.userId) : null) || byName.get(s.name.toLowerCase()) || null;
-    const known = member && (member.characters || [])
-      .find(ch => String(ch.name || '').toLowerCase() === s.name.toLowerCase());
+    const chars = (member && member.characters) || [];
+    const signupCls = (s.cls || '').toLowerCase().trim();
 
+    // First the character the roster knows by the signed-up name.
+    let known = chars.find(ch => String(ch.name || '').toLowerCase() === s.name.toLowerCase()) || null;
+
+    // Failing that, the member's character whose class matches the signup — the
+    // one they'd actually loot on. Main wins a tie; otherwise the first of that
+    // class. Only reached when the signup name isn't a roster character.
+    let matchedByClass = false;
+    if(!known && member && signupCls){
+      const ofClass = chars.filter(ch => String(ch.cls || '').toLowerCase().trim() === signupCls);
+      known = ofClass.find(ch => ch.isMain) || ofClass[0] || null;
+      matchedByClass = !!known;
+    }
+
+    // The character resolved to is who holds the prio, so it names the candidate —
+    // that is what the loot history and gear tables key on. With nothing resolved,
+    // the signup's own name stands.
+    const name = known ? known.name : s.name;
     // The signup wins; the roster is the fallback for whatever it left out.
     const cls = (s.cls || (known && known.cls) || '').toLowerCase().trim();
     let spec = (s.spec || (known && known.spec) || '').toLowerCase().replace(/[^a-z]/g, '');
 
     const c = {
       id: s.id,
-      name: s.name,
+      name,
       cls: RH.CLASS_COLORS[cls] ? cls : (RH.SPEC_TO_CLASS[spec] || ''),
       spec,
       status: s.status || 'active',
@@ -645,11 +671,13 @@ function buildCandidates(signups, members){
     c.role = RH.isTank(c) ? 'tank' : RH.isHealer(c) ? 'healer' : 'dps';
     if(!member) unlinked++;
     if(!spec) noSpec++;
+    if(matchedByClass) byClass++;
     return c;
   });
 
   const notes = [];
   if(unlinked) notes.push(`${unlinked} not linked to a member`);
+  if(byClass) notes.push(`${byClass} matched to a character by class`);
   if(noSpec) notes.push(`${noSpec} with no spec on the signup or in the logs`);
   return notes;
 }

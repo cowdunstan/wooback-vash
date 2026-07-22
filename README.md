@@ -95,7 +95,13 @@ board, identity links, loot, and attendance.
   (`Cuffs of Devastation → Arcane > Balance > Ele > Destro`); `loot-prio.js` maps
   those to specs (`SPEC_TOKENS`) and matches them against the spec each raider
   signed up with, falling back to the spec a Warcraft Logs import last saw for
-  that character. P2 spells the same specs out where P3 abbreviates
+  that character. The name Raid-Helper carries isn't trusted outright: when it
+  matches a roster character that character holds the prio, but when it doesn't
+  (a Discord nick, an alt spelled differently, a bare class) the **Discord id**
+  resolves the member and the **signed-up class** picks the character of theirs
+  it fits — their main breaking a tie — so the loot the page shows lands on the
+  character who would actually take it, with the **HAS** / **WON** / recency pills
+  keyed to it. P2 spells the same specs out where P3 abbreviates
   (`Retribution` for `Ret`, `Feral Tank` for `Bear`), so one table carries both —
   its longer keys are matched exactly before any P3 key is tried as a substring.
 
