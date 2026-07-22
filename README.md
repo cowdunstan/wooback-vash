@@ -78,19 +78,22 @@ board, identity links, loot, and attendance.
   and every roll on it, plus its icon, hover tooltip and a Wowhead link. Every item
   name on the site links here — the loot log, loot history, loot stats, and each
   item, gem and "also worn" entry on a character sheet.
-- **`sheet.html`** — a read-only `<iframe>` of the guild's loot / BIS sheet
-  (`SHEET_EMBED_URL`), open to any signed-in tier. Reads the live sheet via its
-  "anyone with the link" share setting, so the sign-in gate here is for the app's
-  flow, not a data barrier.
+- **`sheet.html`** — a read-only `<iframe>` of the guild's loot / BIS sheets
+  (`SHEET_DOCS`, one per phase with a button to switch between them), open to any
+  signed-in tier. Reads the live sheets via their "anyone with the link" share
+  setting, so the sign-in gate here is for the app's flow, not a data barrier.
 - **`loot-prio.html`** — **loot prio** (**officers only**): the join between the
-  loot sheet and who is actually raiding. Pick one Raid-Helper signup and a raid
-  (**Black Temple** or **Mount Hyjal** — the sheet is the P3 one and has no SSC/TK
-  tabs) and every boss's items come back with the characters signed up that hold
-  prio, in the sheet's own order. The sheet writes prio as **spec tokens**
+  loot sheets and who is actually raiding. Pick one Raid-Helper signup and a raid
+  — **Black Temple** or **Mount Hyjal** from the P3 sheet, **Serpentshrine
+  Cavern** or **Tempest Keep** from the P2 one — and every boss's items come back
+  with the characters signed up that hold prio, in the sheet's own order. Both
+  sheets write prio as **spec tokens**
   (`Cuffs of Devastation → Arcane > Balance > Ele > Destro`); `loot-prio.js` maps
   those to specs (`SPEC_TOKENS`) and matches them against the spec each raider
   signed up with, falling back to the spec a Warcraft Logs import last saw for
-  that character.
+  that character. P2 spells the same specs out where P3 abbreviates
+  (`Retribution` for `Ret`, `Feral Tank` for `Bear`), so one table carries both —
+  its longer keys are matched exactly before any P3 key is tried as a substring.
 
   Two of the guild's tokens are ambiguous as text — `Resto` is the druid *or* the
   shaman, `Holy` the paladin *or* the priest — and the sheet settles them with
@@ -109,7 +112,10 @@ board, identity links, loot, and attendance.
   (already wearing it, from the gear snapshots), **WON** (already awarded it) and
   a `×N` tally of their wins in the last 28 days, so a tie inside a tier has a
   tiebreaker. **Copy as text** dumps the whole plan for pasting into Discord.
-  Which tab is which raid is `RAID_TABS` in `loot-prio.js` — one line per raid.
+  Which tabs make up which raid is `RAID_TABS` in `loot-prio.js`. The two sheets
+  are shaped differently and the entry says so: a P3 raid is **one tab** that
+  banners each boss inside it, a P2 raid is **one tab per boss** (plus its trash
+  tab, plus the shared tier-set tab) and each names the section it belongs to.
 
   **Gargul SR string** turns the plan into a soft-reserve import. A soft reserve
   is flat where the sheet's prio is ordered, so the rule is: **the top tier
@@ -198,16 +204,18 @@ A .NET 8 Minimal-API app (EF Core + Npgsql). Routes:
   the item (name, icon, quality, item level), who has it equipped in their latest
   gear snapshot, how often it dropped, and every award with its rolls. An id also
   picks up hand-typed awards that carry only the name, so both reach one page.
-- **Loot-sheet proxy** — `GET /sheet/loot?gid=`, officer-gated. Returns one tab of
-  the guild's Google loot sheet (cached 10 min) for `loot-prio.html`.
+- **Loot-sheet proxy** — `GET /sheet/loot?doc=&gid=`, officer-gated. Returns one
+  tab of one of the guild's Google loot sheets (cached 10 min per doc/tab/view)
+  for `loot-prio.html`. `?doc=` names a phase — `p3` (the default, so an older
+  client keeps working) or `p2` — and must be a key of `LootSheet:Docs`;
   `?format=html` (the default) is the embedded view, which keeps the cell colours
-  the sheet encodes class in; `?format=csv` is the plain export, ~9 KB against
+  the sheets encode class in, and `?format=csv` is the plain export, ~9 KB against
   ~140 KB but with no formatting at all. There
-  is no credential here — the doc is link-shared, so both answer an
+  is no credential here — the docs are link-shared, so both answer an
   anonymous GET; the proxy exists only because Google sends no CORS header. The
-  document id is `LootSheet:DocId` in `appsettings.json`, the same doc
-  `SHEET_EMBED_URL` in `sheet.html` embeds — **change both together**, and keep
-  its General access on "Anyone with the link → Viewer" or both pages break.
+  document ids are `LootSheet:Docs` in `appsettings.json`, the same docs
+  `SHEET_DOCS` in `sheet.html` embeds — **change both together**, and keep
+  their General access on "Anyone with the link → Viewer" or both pages break.
 - **Item-name lookup** — `POST /api/items/resolve` `{ names: [...] }`, officer-gated,
   max 500 names. Returns `{ resolved: { name: id }, unresolved: [...] }`. Bridges the
   loot sheet (names) to a Gargul soft reserve (ids) via Blizzard's item search on
@@ -312,13 +320,16 @@ Classic Era (`profile-classic1x-us`) both 404 on the guild, and the realm is mis
 from their realm indexes entirely. Officer-gated, and the sync only updates guild
 fields: it never creates, deletes, or ignores a character.
 
-### 6. Loot sheet
-- No "Publish to web" needed. `SHEET_EMBED_URL` in `sheet.html` is the sheet's own
-  link with `/edit?usp=sharing` replaced by `/preview`. Swap the id to point it at
-  a different sheet.
-- The sheet's **General access must be "Anyone with the link → Viewer"** so members
-  see it without a Google login. Anyone with the link can read its contents, so
-  don't put anything guild-private on a tab of this sheet.
+### 6. Loot sheets
+- One document per phase: **P3** (Black Temple, Hyjal) and **P2** (SSC, Tempest
+  Keep). Both are listed in `SHEET_DOCS` in `sheet.html` and in `LootSheet:Docs`
+  in the backend's `appsettings.json` — **keep the two lists in step**.
+- No "Publish to web" needed. `sheet.html` builds each embed from the document id
+  with `/preview`, which is the sheet's own share link minus `/edit?usp=sharing`.
+  Swap an id to point a phase at a different sheet.
+- Each sheet's **General access must be "Anyone with the link → Viewer"** so
+  members see it without a Google login. Anyone with the link can read its
+  contents, so don't put anything guild-private on a tab of either sheet.
 
 ### 7. CORS / origins
 The backend's allowed browser origins (`wooback.info`, `www.wooback.info`,

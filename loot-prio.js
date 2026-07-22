@@ -1,5 +1,5 @@
 /* ───────────────────────── Loot prio ─────────────────────────
-   One Raid-Helper signup + one raid tab of the guild loot sheet → who holds prio
+   One Raid-Helper signup + one raid of the guild loot sheets → who holds prio
    on every item that drops tonight.
 
    The sheet already answers "which spec wants this item, in what order"
@@ -17,18 +17,46 @@
 
 const STORE_KEY = 'vashj_loot_prio';
 
-/* Tab gids in the guild loot sheet — the same document sheet.html embeds, read as
-   CSV through the backend's /sheet/loot proxy (Google sends no CORS header, so
-   the browser can't fetch the export itself).
+/* What each raid is made of, in the sheets sheet.html embeds, read through the
+   backend's /sheet/loot proxy (Google sends no CORS header, so the browser can't
+   fetch the exports itself).
 
-   Adding a raid is one line here once the sheet grows a tab for it. There is no
-   SSC or TK entry because the sheet is the P3 one and has no such tabs; the other
-   tabs it does have (tier-set TLDR, shadow-res crafting, BIS sources) aren't
-   boss/item grids, so they aren't offered either. */
+   The guild raids two phases at once and keeps a document per phase, laid out
+   differently, so a raid names its `doc` and the tabs that make it up:
+
+     • P3 (?doc=p3) puts a whole raid on one tab and banners each boss inside it,
+       so one tab with no `section` — parseRaidTab reads the headings off the
+       boss rows. Its other tabs (tier-set TLDR, shadow-res crafting, BIS
+       sources) aren't boss/item grids, so they aren't offered.
+     • P2 (?doc=p2) is a tab per boss with no banner row, so every tab carries the
+       `section` it should be filed under. Trash is a tab like any other, and the
+       Tier Sets tab is appended to both raids because tokens drop in both. */
 const RAID_TABS = [
-  { key:'bt', label:'Black Temple', gid:'1226096003' },
-  { key:'mh', label:'Mount Hyjal',  gid:'1714599159' }
+  { key:'bt', label:'Black Temple (P3)', doc:'p3', tabs:[{ gid:'1226096003' }] },
+  { key:'mh', label:'Mount Hyjal (P3)',  doc:'p3', tabs:[{ gid:'1714599159' }] },
+
+  { key:'ssc', label:'Serpentshrine Cavern (P2)', doc:'p2', tabs:[
+      { gid:'324929599',  section:'Hydross the Unstable' },
+      { gid:'8551419',    section:'The Lurker Below' },
+      { gid:'420793116',  section:'Leotheras the Blind' },
+      { gid:'152003569',  section:'Fathom-Lord Karathress' },
+      { gid:'821616370',  section:'Morogrim Tidewalker' },
+      { gid:'1241401949', section:'Lady Vashj' },
+      { gid:'1405398559', section:'Serpentshrine Cavern trash' },
+      { gid:'649478556',  section:'Tier sets' }
+  ] },
+  { key:'tk', label:'Tempest Keep (P2)', doc:'p2', tabs:[
+      { gid:'1032392127', section:'Al’ar' },
+      { gid:'1216905087', section:'Void Reaver' },
+      { gid:'2111072609', section:'High Astromancer Solarian' },
+      { gid:'1959598972', section:'Kael’thas Sunstrider' },
+      { gid:'1626986966', section:'Tempest Keep trash' },
+      { gid:'649478556',  section:'Tier sets' }
+  ] }
 ];
+
+// The phase each raid's picker option is grouped under.
+const PHASE_LABELS = { p3:'Phase 3', p2:'Phase 2' };
 
 /* Sheet token → the specs it means. A list, because two of the guild's tokens are
    genuinely ambiguous and expanding them is more honest than guessing:
@@ -37,21 +65,31 @@ const RAID_TABS = [
        "Holy > Resto" on a cloth piece plainly mean the priest, so both are
        offered and the note column settles it. "Holy Priest" is exact.
 
+   One table serves both phases. P2 writes the same specs out in full where P3
+   abbreviates ("Retribution" for "Ret", "Feral Tank" for "Bear"), and those
+   phrases are longer than every P3 key — and an exact match is tried before any
+   substring — so adding them changes nothing about how P3 reads.
+
    `spec` null means any spec of that class. `role` narrows a token to one side of
    a spec Raid-Helper doesn't split (bear vs cat both sign up "feral"), and only
    applies when the candidate's role is known.
 
    Spec names are the ones RH.mapSignups produces: lowercased, letters only. */
 const SPEC_TOKENS = {
-  'holy priest':  [{ cls:'priest',  spec:'holy' }],
+  'holy priest':    [{ cls:'priest',  spec:'holy' }],
+  // P2's word for the healing side of the class, either spec of it.
+  'healing priest': [{ cls:'priest',  spec:'holy' }, { cls:'priest', spec:'discipline' }],
   'shadow':       [{ cls:'priest',  spec:'shadow' }],
   'disc':         [{ cls:'priest',  spec:'discipline' }],
   'discipline':   [{ cls:'priest',  spec:'discipline' }],
 
   'resto':        [{ cls:'druid',   spec:'restoration' }, { cls:'shaman', spec:'restoration' }],
+  'resto druid':  [{ cls:'druid',   spec:'restoration' }],
   'balance':      [{ cls:'druid',   spec:'balance' }],
   'bear':         [{ cls:'druid',   spec:'guardian' }, { cls:'druid', spec:'feral', role:'tank' }],
+  'feral tank':   [{ cls:'druid',   spec:'guardian' }, { cls:'druid', spec:'feral', role:'tank' }],
   'cat':          [{ cls:'druid',   spec:'feral', role:'dps' }],
+  'feral dps':    [{ cls:'druid',   spec:'feral', role:'dps' }],
   'feral':        [{ cls:'druid',   spec:'feral' }],
 
   'dps warrior':  [{ cls:'warrior', spec:'arms' }, { cls:'warrior', spec:'fury' }],
@@ -66,24 +104,45 @@ const SPEC_TOKENS = {
   'rogue':        [{ cls:'rogue',   spec:null }],
 
   'holy':         [{ cls:'paladin', spec:'holy' }, { cls:'priest', spec:'holy' }],
+  'holy paladin': [{ cls:'paladin', spec:'holy' }],
   'prot':         [{ cls:'paladin', spec:'protection' }],
+  'prot paladin': [{ cls:'paladin', spec:'protection' }],
   'ret':          [{ cls:'paladin', spec:'retribution' }],
+  'retribution':  [{ cls:'paladin', spec:'retribution' }],
 
   'enh':          [{ cls:'shaman',  spec:'enhancement' }],
+  'enhancement':  [{ cls:'shaman',  spec:'enhancement' }],
   'ele':          [{ cls:'shaman',  spec:'elemental' }],
+  'elemental':    [{ cls:'shaman',  spec:'elemental' }],
+  'resto shaman': [{ cls:'shaman',  spec:'restoration' }],
 
   'survival':     [{ cls:'hunter',  spec:'survival' }],
   'bm':           [{ cls:'hunter',  spec:'beastmastery' }],
+  'bm hunter':    [{ cls:'hunter',  spec:'beastmastery' }],
   'marksmanship': [{ cls:'hunter',  spec:'marksmanship' }],
   'hunter':       [{ cls:'hunter',  spec:null }],
 
   'destro':       [{ cls:'warlock', spec:'destruction' }],
+  'destruction':  [{ cls:'warlock', spec:'destruction' }],
+  // P2 spells out which school the destro lock is stacking. Same spec either way
+  // — the distinction is which caster gear it wants, not who may roll.
+  'shadow destruction': [{ cls:'warlock', spec:'destruction' }],
+  'fire destruction':   [{ cls:'warlock', spec:'destruction' }],
   'affliction':   [{ cls:'warlock', spec:'affliction' }],
   'demonology':   [{ cls:'warlock', spec:'demonology' }],
 
   'arcane':       [{ cls:'mage',    spec:'arcane' }],
   'fire':         [{ cls:'mage',    spec:'fire' }],
   'frost':        [{ cls:'mage',    spec:'frost' }],
+
+  // Two P2 tokens that name a job rather than a spec. "Spellfire Caster" is the
+  // tailored cloth set, worn by the mage and the warlock alike, so it lists both
+  // and renders with the ambiguity marker for an officer to settle.
+  'healers':          [{ cls:'paladin', spec:'holy' }, { cls:'priest', spec:'holy' },
+                       { cls:'priest',  spec:'discipline' }, { cls:'druid', spec:'restoration' },
+                       { cls:'shaman',  spec:'restoration' }],
+  'spellfire caster': [{ cls:'mage',    spec:'fire' }, { cls:'mage', spec:'arcane' },
+                       { cls:'warlock', spec:'destruction' }, { cls:'warlock', spec:'affliction' }],
 
   // Whole-class fallbacks, for a row that names a class where a spec belongs.
   'priest':       [{ cls:'priest',  spec:null }],
@@ -134,22 +193,24 @@ function raidTab(key){ return RAID_TABS.find(r => r.key === key) || RAID_TABS[0]
    export carries no formatting at all, so on that path those stay ambiguous and
    the page says so. */
 
-// The class each of the sheet's fills means. These are the sheet's own hexes,
-// which are close to but not identical with RH.CLASS_COLORS (the sheet uses
-// #ff7c0a for druid where menu.js has #FF7D0A), so matching is nearest-colour
-// with a tight cutoff rather than equality — a re-typed fill a shade off still
-// lands, an unrelated colour still misses.
+// The class each of the sheets' fills means. These are the sheets' own hexes,
+// which are close to but not identical with RH.CLASS_COLORS (they use #ff7c0a for
+// druid where menu.js has #FF7D0A), so matching is nearest-colour with a tight
+// cutoff rather than equality — a re-typed fill a shade off still lands, an
+// unrelated colour still misses. Both phases fill alike bar the warlock, where P2
+// picked a purple far enough from P3's to need naming separately.
 const SHEET_CLASS_FILLS = {
   '#c69b6d':'warrior', '#f48cba':'paladin', '#aad372':'hunter', '#fff468':'rogue',
   '#ffffff':'priest',  '#0070dd':'shaman',  '#3fc7eb':'mage',   '#8788ee':'warlock',
-  '#ff7c0a':'druid'
+  '#8e7cc3':'warlock', '#ff7c0a':'druid'
 };
 
 // Fills that are page furniture, not a class: the row banding, the grey on the
-// operator cells, the header greys. White is deliberately absent — it is the
-// priest, and it is also the default cell background, which is why a token cell
-// is only ever read for colour when it holds a token.
-const NEUTRAL_FILLS = ['#f3f3f3', '#d9d9d9', '#666666', '#bdbdbd', '#efefef', '#cccccc'];
+// operator cells, the header greys (P2 bands its slot headings in #999999). White
+// is deliberately absent — it is the priest, and it is also the default cell
+// background, which is why a token cell is only ever read for colour when it
+// holds a token.
+const NEUTRAL_FILLS = ['#f3f3f3', '#d9d9d9', '#666666', '#999999', '#bdbdbd', '#efefef', '#cccccc'];
 
 function parseHexColor(s){
   const m = String(s || '').trim().match(/^#?([0-9a-f]{6})$/i);
@@ -256,15 +317,20 @@ function parseCsv(text){
   return rows;
 }
 
-/* ───────────────────────── The sheet ─────────────────────────
-   Every raid tab repeats one shape:
+/* ───────────────────────── The sheets ─────────────────────────
+   Every tab of either phase repeats one shape:
 
      Rage Winterchill,,,,…                      <- boss: col A set, B and C empty
      Item Name,Bias,,,,…                        <- header, skipped
      Cuffs of Devastation,Arcane,>,Balance,>,Ele,>,Destro,,Arcane does not get…
      ,,,,,,,,,,,"Shaman gets shield, …"         <- a note continuing the row above
 
-   Each tab also carries a far-right **legend** column — the list of canonical
+   P3 banners its bosses that way inside one tab per raid. P2 gives each boss its
+   own tab and so has no banner rows at all — RAID_TABS names the section instead,
+   and what banner rows P2 does have are subdivisions (the Tier Sets tab bands
+   "Helms", "Gloves", …), which land under the tab's name.
+
+   P3's tabs also carry a far-right **legend** column — the list of canonical
    tokens the sheet is written in, one per row, starting on the header row. It
    isn't part of any item, so it has to be found and excluded: left in, it
    reappears as a stray note ("Guise of the Tidal Lurker … Resto") on whichever
@@ -272,10 +338,17 @@ function parseCsv(text){
    cols B *and* C being empty rather than "everything after A" — the legend puts
    text on some boss rows, which a whole-row emptiness test would trip over. */
 
+// The header row that opens a tab, if it has one. Col A is not the tell: P3 writes
+// "Item Name" there but P2's tabs have "Item Name/o ", "\", "bb", "ww" and other
+// leftovers. Col B says "Bias" on every tab of both.
+function isHeaderRow(row){
+  return /^bias$/i.test(txt(row[1])) || /^item name$/i.test(txt(row[0]));
+}
+
 // The column the legend starts in, so notes can stop before it. It is the only
-// thing on the first "Item Name, Bias" header row past the Bias column.
+// thing on the header row past the Bias column; P2 has no legend, so Infinity.
 function legendColumn(rows){
-  const header = rows.find(r => /^item name$/i.test(txt(r[0])));
+  const header = rows.find(isHeaderRow);
   if(!header) return Infinity;
   for(let i = 2; i < header.length; i++) if(txt(header[i])) return i;
   return Infinity;
@@ -296,8 +369,19 @@ function cellsFrom(row, i, end){
    druid-orange is the druid and "Resto" in shaman-blue is the shaman, and the
    text alone cannot tell you which. A fill that isn't a class colour, or the CSV
    path where there is no fill at all, leaves the token as broad as it was. */
+/* A sentence, not a token. The token match below is a substring one — it has to
+   be, to read "No Talon Rogue" and "BM with CVoS" — and a sentence will always
+   contain some spec's name somewhere ("…DPS Warriors and Ret Paladins. Use your
+   own discretion" on P2's Verdant Sphere), which would otherwise make the whole
+   paragraph tier 1. Nothing the sheets write as a token runs past four words or
+   carries punctuation. */
+function isProse(text){
+  return /[,;.]/.test(text) || text.trim().split(/\s+/).length > 4;
+}
+
 function tokenSpecs(raw, bg){
   const text = String(raw).toLowerCase().replace(/\*/g, ' ');
+  if(isProse(text)) return null;
   const parts = text.split('/').map(s => s.trim()).filter(Boolean);
   const specs = [];
   let matched = false;
@@ -323,13 +407,58 @@ function tokenSpecs(raw, bg){
   return specs;
 }
 
-function parseRaidTab(grid){
+/* Walk the Bias chain of one row into `item`: token, operator, token, … Anything
+   that is neither ends the chain, and it plus every non-empty cell after it is a
+   note. Starts at col B, which is where both phases put the first token. */
+function walkChain(row, item, legend, unknown){
+  let i = 1;
+  let tier = null;
+  while(i < row.length && i < legend){
+    const raw = txt(row[i]);
+    if(!raw) break;
+
+    // "Shadow > Destro > MS > OS": the chain names a couple of specs and then
+    // opens up. That is the end of it either way.
+    if(OPEN_ROLL.test(raw)){ item.openTail = true; i += 1; break; }
+
+    const specs = tokenSpecs(raw, row[i] && row[i].bg);
+    const op = OPERATORS[txt(row[i + 1])];
+
+    if(!specs){
+      // Something the spec table doesn't know. In the Bias column that is
+      // most likely prose, so only take it when an operator follows and the
+      // sheet is plainly writing a chain ("No T5 Rings > Bear > Hunter");
+      // otherwise let it fall through to the notes. Past the first operator
+      // there is no such doubt — we are mid-chain, and the last link
+      // ("Xat > Chankles = Doopey") has no operator after it either.
+      // A null `specs` is resolved against the raiders' names at render time,
+      // and only reported if it matches nothing at all.
+      if(i === 1 && !op) break;
+      unknown.push({ item:item.name, token:raw });
+    }
+
+    if(!tier){ tier = { tokens:[] }; item.tiers.push(tier); }
+    tier.tokens.push({ label:raw, specs });
+
+    if(!op) { i += 1; break; }
+    if(op === 'next') tier = null;
+    i += 2;
+  }
+  item.notes.push(...cellsFrom(row, i, legend).filter(Boolean));
+}
+
+/* One tab, as sections of items. `forcedSection` is the boss the whole tab is
+   about — P2's shape, where the tab is the boss and nothing inside it says so.
+   Given one, banner rows read as subdivisions of it ("Tier sets — Helms") rather
+   than as bosses in their own right. */
+function parseRaidTab(grid, forcedSection){
   const rows = grid;
   const out = [];
   const unknown = [];
   const legend = legendColumn(rows);
-  let section = null;
+  let section = forcedSection ? { name:forcedSection, items:[] } : null;
   let lastItem = null;
+  if(section) out.push(section);
 
   rows.forEach(row => {
     const a = txt(row[0]);
@@ -345,12 +474,27 @@ function parseRaidTab(grid){
       return;
     }
 
-    if(a && !b && !c){ section = { name:a, items:[] }; out.push(section); lastItem = null; return; }
-    if(/^item name$/i.test(a)) return;
+    if(isHeaderRow(row)) return;
+
+    if(a && !b && !c){
+      const name = forcedSection ? `${forcedSection} — ${a}` : a;
+      section = { name, items:[] };
+      out.push(section);
+      lastItem = null;
+      return;
+    }
 
     if(!a){
-      // Col A empty but something further along — a continuation of the item above.
-      if(lastItem) lastItem.notes.push(...cellsFrom(row, 1, legend).filter(Boolean));
+      // Col A empty but something further along. Usually a note continuing the
+      // item above — but P2 also writes an item whose bias was too long for one
+      // cell on the next row ("Verdant Sphere", where col B holds the prose and
+      // the chain follows underneath), so a chain that starts here belongs to
+      // that item as prio, not as more prose.
+      if(!lastItem) return;
+      if(!lastItem.tiers.length && !lastItem.openRoll && tokenSpecs(b, row[1] && row[1].bg))
+        walkChain(row, lastItem, legend, unknown);
+      else
+        lastItem.notes.push(...cellsFrom(row, 1, legend).filter(Boolean));
       return;
     }
 
@@ -362,42 +506,7 @@ function parseRaidTab(grid){
       item.openRoll = true;
       item.notes.push(...cellsFrom(row, 2, legend).filter(Boolean));
     } else {
-      // Walk the Bias chain: token, operator, token, … Anything that is neither
-      // ends the chain, and it plus every non-empty cell after it is a note.
-      let i = 1;
-      let tier = null;
-      while(i < row.length && i < legend){
-        const raw = txt(row[i]);
-        if(!raw) break;
-
-        // "Shadow > Destro > MS > OS": the chain names a couple of specs and then
-        // opens up. That is the end of it either way.
-        if(OPEN_ROLL.test(raw)){ item.openTail = true; i += 1; break; }
-
-        const specs = tokenSpecs(raw, row[i] && row[i].bg);
-        const op = OPERATORS[txt(row[i + 1])];
-
-        if(!specs){
-          // Something the spec table doesn't know. In the Bias column that is
-          // most likely prose, so only take it when an operator follows and the
-          // sheet is plainly writing a chain ("No T5 Rings > Bear > Hunter");
-          // otherwise let it fall through to the notes. Past the first operator
-          // there is no such doubt — we are mid-chain, and the last link
-          // ("Xat > Chankles = Doopey") has no operator after it either.
-          // A null `specs` is resolved against the raiders' names at render time,
-          // and only reported if it matches nothing at all.
-          if(i === 1 && !op) break;
-          unknown.push({ item:a, token:raw });
-        }
-
-        if(!tier){ tier = { tokens:[] }; item.tiers.push(tier); }
-        tier.tokens.push({ label:raw, specs });
-
-        if(!op) { i += 1; break; }
-        if(op === 'next') tier = null;
-        i += 2;
-      }
-      item.notes.push(...cellsFrom(row, i, legend).filter(Boolean));
+      walkChain(row, item, legend, unknown);
     }
 
     // A note cell that is itself a known token would have been eaten as prio, so
@@ -406,8 +515,10 @@ function parseRaidTab(grid){
     lastItem = item;
   });
 
-  unknownTokens = unknown;
-  return out;
+  // A raid can be many tabs, so this adds to what the ones before it found —
+  // build() clears the list before the first.
+  unknownTokens.push(...unknown);
+  return out.filter(s => s.items.length);
 }
 
 /* ───────────────────────── Who is here ─────────────────────────
@@ -561,9 +672,10 @@ async function apiGet(path){
    fallback if that ever stops parsing, and costs only the disambiguation of
    "Resto" and "Holy". `colored` tells the caller which it got, so the page can
    say so rather than quietly guessing. */
-async function fetchSheetGrid(gid){
+async function fetchSheetGrid(doc, gid){
+  const q = 'doc=' + encodeURIComponent(doc) + '&gid=' + encodeURIComponent(gid);
   try {
-    const html = await (await apiGet('/sheet/loot?gid=' + encodeURIComponent(gid))).text();
+    const html = await (await apiGet('/sheet/loot?' + q)).text();
     const grid = parseHtmlGrid(html);
     if(!grid.length) throw new Error('The embedded sheet view had no rows.');
     return { grid, colored:true };
@@ -571,9 +683,16 @@ async function fetchSheetGrid(gid){
     // A 401/403 is the session, not the view — that must surface as itself.
     if(err.status) throw err;
     console.warn('Falling back to the CSV export of the loot sheet:', err);
-    const csv = await (await apiGet('/sheet/loot?format=csv&gid=' + encodeURIComponent(gid))).text();
+    const csv = await (await apiGet('/sheet/loot?format=csv&' + q)).text();
     return { grid: parseCsvGrid(csv), colored:false };
   }
+}
+
+/* Every tab a raid is made of, in order. One request per tab — a P2 raid is
+   seven of them — but the backend caches each for ten minutes, so a rebuild
+   mid-raid costs nothing. */
+function fetchRaidTabs(raid){
+  return Promise.all(raid.tabs.map(t => fetchSheetGrid(raid.doc, t.gid)));
 }
 
 async function loadEvents(){
@@ -610,15 +729,15 @@ async function build(){
   const raidKey = document.getElementById('raidPick').value;
   if(!eventId){ setStatus('Load the events and pick one first.', true); return; }
 
-  const tab = raidTab(raidKey);
-  setStatus(`Loading the signup, the roster and the ${tab.label} sheet…`);
+  const raid = raidTab(raidKey);
+  setStatus(`Loading the signup, the roster and the ${raid.label} sheet…`);
 
-  let ev, members, sheet;
+  let ev, members, tabs;
   try {
-    [ev, members, sheet, equipped, awards] = await Promise.all([
+    [ev, members, tabs, equipped, awards] = await Promise.all([
       RH.fetchEvent(eventId),
       apiGet('/api/members').then(r => r.json()),
-      fetchSheetGrid(tab.gid),
+      fetchRaidTabs(raid),
       apiGet('/api/items/list').then(r => r.json()).catch(() => []),
       apiGet('/api/loot').then(r => r.json()).catch(() => [])
     ]);
@@ -631,11 +750,13 @@ async function build(){
   if(!signups.length){ setStatus('That event has no usable signups.', true); return; }
 
   const rosterNotes = buildCandidates(signups, members);
-  sections = parseRaidTab(sheet.grid);
+  unknownTokens = [];
+  sections = tabs.reduce(
+    (all, tab, i) => all.concat(parseRaidTab(tab.grid, raid.tabs[i].section)), []);
   picked = { eventId, eventTitle: ev.title || 'event ' + eventId, raid: raidKey };
 
   const items = sections.reduce((n, s) => n + s.items.length, 0);
-  if(!items){ setStatus(`The ${tab.label} tab parsed to no items — has its layout changed?`, true); return; }
+  if(!items){ setStatus(`The ${raid.label} sheet parsed to no items — has its layout changed?`, true); return; }
 
   save();
   render();
@@ -646,12 +767,13 @@ async function build(){
   const stillUnknown = unknownTokens.filter(u => !names.has(u.token.toLowerCase()));
 
   const notes = [...rosterNotes];
-  if(!sheet.colored) notes.push('read without cell colours, so "Resto" and "Holy" stay ambiguous');
+  if(tabs.some(t => !t.colored))
+    notes.push('read without cell colours, so "Resto" and "Holy" stay ambiguous');
   if(stillUnknown.length){
     console.warn('Loot sheet tokens that are neither a spec nor a raider signed up:', stillUnknown);
     notes.push(`${stillUnknown.length} sheet token${stillUnknown.length===1?'':'s'} not recognised — see the console`);
   }
-  setStatus(`${candidates.length} signed up · ${items} items across ${sections.length} sections of ${tab.label}` +
+  setStatus(`${candidates.length} signed up · ${items} items across ${sections.length} sections of ${raid.label}` +
             (notes.length ? ` — ${notes.join(', ')}.` : '.'));
 }
 
@@ -916,8 +1038,7 @@ function buildReserves(itemIds){
 async function copyGargulSR(){
   if(!sections.length){ setStatus('Build a prio list first.', true); return; }
 
-  const tab = raidTab(picked.raid);
-  setStatus(`Looking up item ids for ${tab.label}…`);
+  setStatus(`Looking up item ids for ${raidTab(picked.raid).label}…`);
 
   // Only the items that actually have a reserver need an id.
   const wanted = [];
@@ -1079,8 +1200,14 @@ function startOver(){
     else document.addEventListener('DOMContentLoaded', fn);
   }
   ready(function(){
-    document.getElementById('raidPick').innerHTML =
-      RAID_TABS.map(r => `<option value="${r.key}">${whEsc(r.label)}</option>`).join('');
+    // Grouped by phase, because the guild raids two and the picker is otherwise
+    // four flat entries with the phase buried in each label.
+    const phases = [...new Set(RAID_TABS.map(r => r.doc))];
+    document.getElementById('raidPick').innerHTML = phases.map(doc =>
+      `<optgroup label="${whEsc(PHASE_LABELS[doc] || doc)}">` +
+      RAID_TABS.filter(r => r.doc === doc)
+               .map(r => `<option value="${r.key}">${whEsc(r.label)}</option>`).join('') +
+      '</optgroup>').join('');
     restore();
     setStatus('Load the events, pick tonight’s signup and the raid, then build.');
   });

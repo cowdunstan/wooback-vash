@@ -13,10 +13,11 @@ namespace WoobackVash.Api.Proxy;
 ///  • /wcl/reports   Warcraft Logs report list — any signed-in tier (logs are
 ///                   public). ?fresh=1 forces a live refresh (officers only).
 ///  • /wcl/ratelimit Warcraft Logs points budget — officer-only diagnostics.
-///  • /sheet/loot    One tab of the guild Google loot sheet — officer-only. Not a
-///                   credential proxy (the doc is link-shared); it exists because
-///                   Google sends no CORS header. ?format=html keeps the cell
-///                   colours the sheet encodes class in, ?format=csv does not.
+///  • /sheet/loot    One tab of a guild Google loot sheet — officer-only. Not a
+///                   credential proxy (the docs are link-shared); it exists because
+///                   Google sends no CORS header. ?doc=p3|p2 picks the phase's
+///                   document, ?format=html keeps the cell colours the sheets
+///                   encode class in, ?format=csv does not.
 /// </summary>
 public static class ProxyEndpoints
 {
@@ -96,10 +97,11 @@ public static class ProxyEndpoints
             return Results.Text(body, "application/json", statusCode: status);
         });
 
-        // One tab of the guild loot sheet — officer-only, because it feeds the
-        // loot-prio page, which is officer work. The document id lives in config
-        // and is never client-supplied; only the tab (gid) is, and it must be
-        // digits, so the URL this builds can't be steered anywhere else.
+        // One tab of a guild loot sheet — officer-only, because it feeds the
+        // loot-prio page, which is officer work. The document ids live in config
+        // and are never client-supplied: ?doc names a phase ("p3", "p2") which
+        // must be a key of LootSheet:Docs, and the tab (gid) must be digits, so
+        // the URL this builds can't be steered anywhere else.
         //
         // ?format=html (the default) returns the embedded view, which keeps the
         // cell fills the sheet uses to say which class a spec token means;
@@ -108,10 +110,20 @@ public static class ProxyEndpoints
         app.MapGet("/sheet/loot", async (
             HttpContext ctx,
             SessionTokenService tokens,
+            IOptions<LootSheetOptions> lootOpt,
             LootSheetService sheet) =>
         {
             var (_, error) = ctx.RequireOfficer(tokens);
             if (error is not null) return error;
+
+            // Absent means the phase the app has always served, so an old client
+            // that doesn't send ?doc keeps working.
+            var doc = ctx.Request.Query["doc"].ToString();
+            if (doc.Length == 0) doc = "p3";
+            if (!lootOpt.Value.Docs.ContainsKey(doc))
+                return Results.Json(new { error = "bad_request",
+                                          detail = $"doc must be one of: {string.Join(", ", lootOpt.Value.Docs.Keys)}." },
+                                    statusCode: 400);
 
             var gid = ctx.Request.Query["gid"].ToString();
             if (string.IsNullOrEmpty(gid) || !gid.All(char.IsAsciiDigit))
@@ -124,7 +136,7 @@ public static class ProxyEndpoints
                                     statusCode: 400);
             var html = format != "csv";
 
-            var (status, body, err) = await sheet.GetTabAsync(gid, html);
+            var (status, body, err) = await sheet.GetTabAsync(doc, gid, html);
             if (body is null)
                 return Results.Json(new { error = "upstream", detail = err }, statusCode: status);
             return Results.Text(body, html ? "text/html" : "text/csv", statusCode: status);

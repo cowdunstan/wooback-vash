@@ -5,9 +5,10 @@ using WoobackVash.Api.Config;
 namespace WoobackVash.Api.Services;
 
 /// <summary>
-/// Reads one tab of the guild's Google loot sheet.
+/// Reads one tab of one of the guild's Google loot sheets — "p3" (Black Temple,
+/// Hyjal) or "p2" (SSC, Tempest Keep), named in <see cref="LootSheetOptions.Docs"/>.
 ///
-/// There is no API key and no OAuth here: the doc is shared "anyone with the link
+/// There is no API key and no OAuth here: each doc is shared "anyone with the link
 /// → viewer", so both views below answer an anonymous GET. The only reason this
 /// lives on the server is CORS — Google sends no Access-Control-Allow-Origin, so
 /// the browser cannot fetch either of them directly.
@@ -21,7 +22,7 @@ namespace WoobackVash.Api.Services;
 ///                  for the day Google changes the embed, where the page still
 ///                  works and only the colour disambiguation is lost.
 ///
-/// Each (tab, view) is cached for <see cref="LootSheetOptions.CacheTtlSeconds"/>:
+/// Each (doc, tab, view) is cached for <see cref="LootSheetOptions.CacheTtlSeconds"/>:
 /// the loot-prio page re-fetches on every build, and the sheet is edited between
 /// raids rather than during one.
 /// </summary>
@@ -45,20 +46,21 @@ public class LootSheetService
     }
 
     /// <summary>Returns (httpStatus, body, error). On success <paramref name="error"/>
-    /// is null; on failure the body is null. <paramref name="gid"/> must already be
-    /// validated as digits by the caller — it is interpolated into the URL.
+    /// is null; on failure the body is null. <paramref name="doc"/> names a phase in
+    /// <see cref="LootSheetOptions.Docs"/> and <paramref name="gid"/> must already be
+    /// validated as digits by the caller — both are interpolated into the URL.
     /// <paramref name="html"/> picks the embedded view over the CSV export.</summary>
-    public async Task<(int Status, string? Body, string? Error)> GetTabAsync(string gid, bool html)
+    public async Task<(int Status, string? Body, string? Error)> GetTabAsync(string doc, string gid, bool html)
     {
-        if (string.IsNullOrWhiteSpace(_opt.DocId))
-            return (501, null, "The loot sheet document id is not set on the server yet.");
+        if (!_opt.Docs.TryGetValue(doc, out var docId) || string.IsNullOrWhiteSpace(docId))
+            return (501, null, $"The {doc} loot sheet document id is not set on the server yet.");
 
-        var key = (html ? "html:" : "csv:") + gid;
+        var key = doc + (html ? ":html:" : ":csv:") + gid;
         if (_cache.TryGetValue(key, out var hit) &&
             (DateTimeOffset.UtcNow - hit.FetchedAt).TotalSeconds < _opt.CacheTtlSeconds)
             return (200, hit.Body, null);
 
-        var baseUrl = $"{_opt.ExportBase.TrimEnd('/')}/{_opt.DocId}";
+        var baseUrl = $"{_opt.ExportBase.TrimEnd('/')}/{docId}";
         var url = html
             ? $"{baseUrl}/htmlembed/sheet?gid={gid}"
             : $"{baseUrl}/export?format=csv&gid={gid}";
@@ -73,7 +75,7 @@ public class LootSheetService
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
         {
-            _log.LogWarning(ex, "Loot sheet fetch failed/timed out for gid {Gid}", gid);
+            _log.LogWarning(ex, "Loot sheet fetch failed/timed out for {Doc} gid {Gid}", doc, gid);
             // A stale copy beats a spinning page mid-raid.
             if (hit is not null) return (200, hit.Body, null);
             return (504, null, "Google Sheets is not responding right now. Try again in a minute.");

@@ -382,7 +382,7 @@ const NAV_LINKS = [
   { href:'loot-history.html', label:'Loot history' },
   { href:'loot-stats.html', label:'Loot stats' },
   { href:'loot-prio.html',  label:'Loot prio',       officer:true },
-  { href:'sheet.html',      label:'Loot sheet' }
+  { href:'sheet.html',      label:'Loot sheets' }
 ];
 
 function renderNav(drawer){

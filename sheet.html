@@ -50,11 +50,13 @@
 
     <div class="sheet-head">
       <div>
-        <h1>Loot Sheet</h1>
-        <p class="subtitle">Read-only BIS &amp; loot-priority guide — updates live from Google Sheets. Use the tabs at the bottom of the sheet.</p>
+        <h1>Loot Sheets</h1>
+        <p class="subtitle">Read-only BIS &amp; loot-priority guides — updates live from Google Sheets. Pick the phase, then use the tabs at the bottom of the sheet.</p>
       </div>
       <a id="sheetOpen" class="btn-ghost" href="#" target="_blank" rel="noopener" style="display:none;">Open full view ↗</a>
     </div>
+
+    <div id="sheetPick" style="display:flex;flex-wrap:wrap;gap:8px;margin:0 0 12px;"></div>
 
     <div id="sheetEmbed" class="sheet-embed"></div>
 
@@ -64,35 +66,68 @@
 
 <script src="menu.js"></script>
 <script>
-/* The loot sheet's read-only embed. This is just the sheet's own share URL with
-   the trailing "/edit?usp=sharing" swapped for "/preview" — no "Publish to web"
-   step. It renders Google's live read-only view (colors, merged banners, tabs).
-   Requirement: the sheet's General access must stay "Anyone with the link →
-   Viewer" so members see it without a Google login; if you later restrict it to
+/* The loot sheets' read-only embeds — one document per phase, because the guild
+   raids two at once: P3 is Black Temple and Hyjal, P2 is SSC and Tempest Keep.
+   Each URL is just that sheet's own share URL with the trailing
+   "/edit?usp=sharing" swapped for "/preview" — no "Publish to web" step. It
+   renders Google's live read-only view (colors, merged banners, tabs).
+   Requirement: each sheet's General access must stay "Anyone with the link →
+   Viewer" so members see it without a Google login; if you later restrict one to
    specific accounts, this frame becomes Google-account gated instead — and the
-   loot-prio page, which reads the same doc as CSV through the backend, stops
-   working too. The document id is repeated as LootSheet:DocId in the backend's
+   loot-prio page, which reads the same docs through the backend, stops working
+   too. The document ids are repeated as LootSheet:Docs in the backend's
    appsettings.json; change both together. */
-const SHEET_EMBED_URL = 'https://docs.google.com/spreadsheets/d/18MHJQi6vz9Ax2yPwreGhnKc0SwvC_xIy2iCBGGgwbb4/preview';
+const SHEET_DOCS = [
+  { key:'p3', label:'P3 loot sheet — BT & Hyjal', id:'18MHJQi6vz9Ax2yPwreGhnKc0SwvC_xIy2iCBGGgwbb4' },
+  { key:'p2', label:'P2 loot sheet — SSC & TK',   id:'12gqqN8Xu2CSQ6z6ETmI-UzjqqvUR2e9Cn_nN36GRKhw' }
+];
+const SHEET_PICK_KEY = 'vashj_loot_sheet_doc';
 
 (function(){
   const host = document.getElementById('sheetEmbed');
-  if(!SHEET_EMBED_URL || SHEET_EMBED_URL === 'PASTE_PUBLISHED_EMBED_URL_HERE'){
+  const pick = document.getElementById('sheetPick');
+  const open = document.getElementById('sheetOpen');
+
+  const connected = SHEET_DOCS.filter(d => d.id);
+  if(!connected.length){
     host.innerHTML =
-      '<div class="sheet-empty">The loot sheet isn’t connected yet.<br>' +
-      'Publish it to the web in Google Sheets and paste the embed URL into ' +
-      '<code>sheet.html</code> (<code>SHEET_EMBED_URL</code>).</div>';
+      '<div class="sheet-empty">The loot sheets aren’t connected yet.<br>' +
+      'Paste each document id into <code>sheet.html</code> ' +
+      '(<code>SHEET_DOCS</code>).</div>';
     return;
   }
+
+  // Remembered because most people live in one phase's sheet and reopen the page
+  // between pulls; the other is one click away.
+  let current = null;
+  try{ current = localStorage.getItem(SHEET_PICK_KEY); }catch(e){}
+  if(!connected.some(d => d.key === current)) current = connected[0].key;
+
   const frame = document.createElement('iframe');
   frame.className = 'sheet-frame';
-  frame.src = SHEET_EMBED_URL;
   frame.loading = 'lazy';
-  frame.title = 'Guild loot sheet';
   host.appendChild(frame);
 
-  const open = document.getElementById('sheetOpen');
-  open.href = SHEET_EMBED_URL;
-  open.style.display = '';
+  function show(key){
+    const doc = connected.find(d => d.key === key) || connected[0];
+    const url = 'https://docs.google.com/spreadsheets/d/' + doc.id + '/preview';
+    current = doc.key;
+    frame.src = url;
+    frame.title = doc.label;
+    open.href = url;
+    open.style.display = '';
+    [...pick.children].forEach(b =>
+      b.className = b.dataset.key === doc.key ? 'btn-primary' : 'btn-ghost');
+    try{ localStorage.setItem(SHEET_PICK_KEY, doc.key); }catch(e){}
+  }
+
+  connected.forEach(doc => {
+    const btn = document.createElement('button');
+    btn.dataset.key = doc.key;
+    btn.textContent = doc.label;
+    btn.onclick = () => show(doc.key);
+    pick.appendChild(btn);
+  });
+  show(current);
 })();
 </script>
