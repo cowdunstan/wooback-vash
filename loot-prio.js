@@ -876,10 +876,14 @@ function itemHTML(item, lookup){
        </div>` };
   }
 
+  // Null when the sheet gave the item no chain at all — P2 does that for the
+  // things prio can't rank ("Ashes of Al'ar: Epic Flying Trained Only"), where
+  // the row is a name and a note. There is nothing to walk; the tier line below
+  // says so instead.
   const plan = reservePlan(item, keys);
   let anyone = false;
   let rank = 0;
-  const tiers = plan.tiers.map((t, i) => {
+  const tiers = !plan ? '' : plan.tiers.map((t, i) => {
     // Every token here already listed above — drop the tier rather than print a
     // rank nobody occupies.
     if(t.groups.every(g => g.repeat)) return '';
