@@ -20,6 +20,10 @@ public class Character
     /// <summary>True for the member's main character; alts are false.</summary>
     public bool IsMain { get; set; }
 
+    /// <summary>Character level from the last Blizzard guild sync or import. 0 means
+    /// never synced (or off the guild roster) — treated as "unknown", not "low level".</summary>
+    public int Level { get; set; }
+
     /// <summary>
     /// Raid role as the logs report it — "tank", "healer" or "dps".
     /// Written by the Warcraft Logs attendance import alongside <see cref="Spec"/>;

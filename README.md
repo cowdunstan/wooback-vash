@@ -36,7 +36,7 @@ board, identity links, loot, and attendance.
   seen; a character-name match against `/api/members` is the fallback for a
   signup with no user id. A signup that matches no member is flagged `UNLINKED`
   on its chip, though its Discord id still pairs that person's two signups so
-  they can't be double-booked either. Someone signed up to only one raid appears as their main. An **item
+  they can't be double-booked either. Someone signed up to only one raid appears as their main. Only **max-level** characters (level 70, the current expansion cap — `LEVEL_CAP` in `groups.js`) are pooled, so a raider's sub-cap bank and leveling alts don't clutter the picker; a character whose level was never synced (0/unknown) is kept rather than dropped. An **item
   check** answers "who has Dragonspine Trophy, and which group are they in?":
   type any comma-separated item names and every wearer is pilled on their chip
   and listed by group, read from each character's latest gear snapshot via
@@ -222,7 +222,8 @@ A .NET 8 Minimal-API app (EF Core + Npgsql). Routes:
   incl. `?linked=false` for unclaimed characters, `POST /api/members/import-discord`
   to seed link rows from the guild's member/officer roster via a bot token, and the
   guild-roster import — `POST /api/characters/sync-guild` stamps each character's guild
-  and stages the roster names we hold no character for into a scratch table, which
+  and **level** (both also carried on each character in the `/api/members` payload) and
+  stages the roster names we hold no character for into a scratch table, which
   `GET /api/characters/import-candidates` lists and `POST /api/characters/import-guild`
   turns into unclaimed characters (guild fields stamped, gear pulled per the sheet's
   refresh) for the ones an officer selects),

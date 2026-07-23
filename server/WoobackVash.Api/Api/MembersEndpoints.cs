@@ -71,7 +71,7 @@ public static class MembersEndpoints
                         .Select(c => new
                         {
                             id = c.Id, name = c.Name, cls = c.Class, spec = c.Spec, realm = c.Realm,
-                            isMain = c.IsMain, notes = c.Notes, ignored = c.Ignored,
+                            level = c.Level, isMain = c.IsMain, notes = c.Notes, ignored = c.Ignored,
                             guildName = c.GuildName, guildRank = c.GuildRank, guildSyncedAt = c.GuildSyncedAt
                         })
                 })
@@ -267,6 +267,7 @@ public static class MembersEndpoints
                 {
                     c.GuildName = guildName;
                     c.GuildRank = hit.Rank;
+                    c.Level = hit.Level;
                     matchedNames.Add(c.Name);
                     inGuild++;
                 }
@@ -397,6 +398,7 @@ public static class MembersEndpoints
                     Name = cand.Name,
                     Class = cand.Class,
                     Realm = cand.RealmSlug,
+                    Level = cand.Level,
                     IsMain = false,
                     Ignored = false,
                     GuildName = guildName,

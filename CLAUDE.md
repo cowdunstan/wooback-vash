@@ -78,5 +78,6 @@ change as cosmetic (and say so).
 - A contract change between the HTML and `menu.js` (renaming `API_BASE`, changing what
   `renderNav` expects) ships under a ~10-minute GitHub Pages cache-skew window — ship
   it, wait it out, then rely on it. See README → *Asset caching*.
-- `WOWHEAD_DOMAIN` in `menu.js` is the one line to flip when the guild changes
-  expansion.
+- `WOWHEAD_DOMAIN` in `menu.js` and `LEVEL_CAP` in `groups.js` both track the current
+  expansion — flip them together when the guild moves on (item tooltips ↔ the max-level
+  filter on the 2-group page).

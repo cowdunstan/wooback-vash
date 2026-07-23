@@ -39,6 +39,18 @@
   .rl-card{background:var(--panel,#0d1a17);border:1px solid var(--panel-line,#1e332d);border-radius:10px;padding:16px;margin-top:14px}
   .rl-card h2{font-family:'Cinzel',serif;font-size:16px;margin:0 0 4px}
   .rl-card .card-sub{color:var(--text-dim,#7f9a92);font-size:12px;margin:0 0 12px}
+  /* The import card is a collapsed <details>: a clickable header row with its own
+     caret, the h2 kept inline so it reads as the summary rather than a stacked title. */
+  /* The page runs in quirks mode (BackCompat), where the UA stylesheet doesn't hide a
+     closed <details>'s content — it overflows below the summary. Hide it explicitly. */
+  details.rl-card:not([open]) > :not(summary){display:none}
+  details.rl-card > summary{cursor:pointer;list-style:none;display:flex;align-items:center;gap:8px;margin:0 0 4px}
+  details.rl-card > summary::-webkit-details-marker{display:none}
+  details.rl-card > summary::before{content:'\25B6';color:var(--text-dim,#7f9a92);font-size:10px;transition:transform .12s}
+  details.rl-card[open] > summary::before{transform:rotate(90deg)}
+  details.rl-card > summary h2{margin:0;display:inline}
+  details.rl-card[open] > summary{margin-bottom:8px}
+  .cand-summary-count{color:var(--text-dim,#7f9a92);font-family:'Inter',sans-serif;font-size:12px;font-weight:500}
   /* Member roster — three cards per row, dropping to two then one as space runs out. */
   #members{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;align-items:start}
   @media (max-width:1200px){ #members{grid-template-columns:repeat(2,minmax(0,1fr))} }
@@ -119,8 +131,8 @@
 
     <div id="members"></div>
 
-    <div class="rl-card" data-officer-only id="importCard">
-      <h2>On the Blizzard roster, not imported</h2>
+    <details class="rl-card" data-officer-only id="importCard">
+      <summary><h2>On the Blizzard roster, not imported<span id="candSummaryCount" class="cand-summary-count"></span></h2></summary>
       <p class="card-sub">Guild characters the last sync found that we hold no record of. Tick the ones to bring in &#8212; each is created unclaimed, stamped with its guild rank, and has its gear pulled from Blizzard (or a recent Warcraft Logs report). Claim them onto members from the unlinked list once imported.</p>
       <div class="rl-toolbar" style="margin:0 0 8px">
         <button class="btn-primary" id="importSelBtn" onclick="importGuild()" disabled>Import selected</button>
@@ -132,7 +144,7 @@
       <table class="rl"><thead><tr><th class="acts" style="width:1%"></th><th>Character</th><th>Class</th><th>Level</th><th>Rank</th></tr></thead>
         <tbody id="candidateBody"><tr><td colspan="5" class="rl-empty">Sync the guild to see who's on the roster but not yet imported.</td></tr></tbody>
       </table>
-    </div>
+    </details>
 
     <div class="rl-card">
       <h2>Unlinked characters</h2>
@@ -463,6 +475,10 @@ function updateImportButton(){
   if(btn){ btn.disabled = n === 0; btn.textContent = n ? 'Import ' + n + ' selected' : 'Import selected'; }
   const count = document.getElementById('candCount');
   if(count) count.textContent = CANDIDATES.length ? CANDIDATES.length + ' on the roster to import' : '';
+  // Mirror the total into the collapsed summary, so an officer sees there's something
+  // to import without opening the card.
+  const summaryCount = document.getElementById('candSummaryCount');
+  if(summaryCount) summaryCount.textContent = CANDIDATES.length ? ' (' + CANDIDATES.length + ')' : '';
 }
 
 // Officer tool: import the ticked candidates. The server creates each character and

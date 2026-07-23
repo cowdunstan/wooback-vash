@@ -15,6 +15,14 @@
 
 const STORE_KEY = 'vashj_groups';
 
+// Max level for the current expansion — flip when the guild moves on, the way
+// WOWHEAD_DOMAIN is flipped in menu.js. Only max-level characters belong in a raid
+// group; a raider who signed up to both raids otherwise expands their sub-cap bank
+// and leveling alts into the pool. Level 0 means never synced (or off the guild
+// roster) — kept as "unknown" so a real raider isn't dropped before the first sync.
+const LEVEL_CAP = 70;
+function atLevelCap(c){ return !c.level || c.level >= LEVEL_CAP; }
+
 let pool = [];                      // every candidate chip, placed or not
 let groups = { 1: [], 2: [] };      // chip ids, in drop order
 let groupSize = 25;
@@ -202,7 +210,7 @@ function buildPool(signupsA, signupsB, members){
       p.signups.forEach(s => chips.push(toChip(s, p, 'UNLINKED')));
       return;
     }
-    const characters = p.member.characters || [];
+    const characters = (p.member.characters || []).filter(atLevelCap);
     if(p.sources.length > 1){
       bothCount++;
       // Every character they have, so the officer chooses which raid gets which.
