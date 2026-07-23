@@ -66,9 +66,14 @@ board, identity links, loot, and attendance.
   roll it has made, and its attendance, with an alt switcher across the member's
   characters. Reached from a name anywhere on the roster, loot history or loot
   stats; opened bare (`character.html`) it resolves to your own main.
-  Gear comes from **Warcraft Logs**, not Blizzard: the attendance import stores a
-  snapshot per character per report (see below), so the sheet reads the database,
-  not a live API, and older nights stay browsable in a picker. The log names each
+  Gear comes from two places. The attendance import stores a **Warcraft Logs**
+  snapshot per character per report (see below), so the sheet reads the database and
+  older nights stay browsable in a picker. And a **Refresh gear** button (owner or
+  officer) pulls a fresh snapshot on demand, so gear isn't frozen at the last night
+  they raided with us: it tries **Blizzard's live equipment** first (whatever they're
+  wearing now, no raid needed) and falls back to the character's most recent Warcraft
+  Logs report anywhere — a pug or another guild counts. A live Blizzard snapshot is
+  labelled as such and has no log link. The log names each
   item and spells out its enchant ("+7 Spell Power and +4 Critical Strike") —
   that text exists nowhere else, since an enchant id is not a spell id — while
   **gems** arrive as bare item ids and are named by **Wowhead**, which also
@@ -226,8 +231,13 @@ A .NET 8 Minimal-API app (EF Core + Npgsql). Routes:
 - **Character sheet** (any signed-in session) — `GET /api/characters/sheet`
   (`?id=`, `?name=`, or nothing for the caller's own main) returns the character,
   its alts, the newest gear snapshot with the list of earlier ones, its loot,
-  rolls and attendance; `GET /api/characters/sheet/history?id=&code=` returns one
-  earlier snapshot.
+  rolls and attendance, and `canRefreshGear` (whether the caller may refresh it);
+  `GET /api/characters/sheet/history?id=&code=` returns one earlier snapshot.
+  `POST /api/characters/sheet/refresh?id=` (**owner or officer**) refreshes gear on
+  demand: Blizzard's live character-equipment route first, falling back to the
+  character's most recent Warcraft Logs report when Blizzard has nothing. A snapshot's
+  `Source` is `"wcl"` or `"blizzard"`; a Blizzard row is keyed by a `"blizzard"`
+  sentinel report code, so it stays a single live row per character.
 - **Item page** (any signed-in session) — `GET /api/items?id=` or `?name=` returns
   the item (name, icon, quality, item level), who has it equipped in their latest
   gear snapshot, how often it dropped, and every award with its rolls. An id also
@@ -338,7 +348,10 @@ on `www.warcraftlogs.com` (shared across game versions).
 ### 5. Blizzard credentials
 **Sync guild from Blizzard** on the roster page pulls the wooback guild roster from
 the Blizzard Game Data API and stamps each character with the guild it's in, so
-officers can see who has left and ignore them. Create a client at
+officers can see who has left and ignore them. The same credentials power the
+character sheet's **Refresh gear** button, which reads a character's live equipment
+from the Blizzard character-profile API (falling back to Warcraft Logs when that
+profile route comes up empty on the Anniversary realm). Create a client at
 https://develop.battle.net/access/clients (the redirect URL is unused for the Client
 Credentials flow) and set its id/secret as the `Blizzard__*` secrets above. The guild
 identity lives in `appsettings.json` (`Blizzard` section): wooback on **Dreamscythe

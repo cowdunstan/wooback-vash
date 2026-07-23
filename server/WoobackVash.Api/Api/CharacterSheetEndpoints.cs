@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using WoobackVash.Api.Auth;
 using WoobackVash.Api.Data;
 using WoobackVash.Api.Models;
+using WoobackVash.Api.Services;
 
 namespace WoobackVash.Api.Api;
 
@@ -54,6 +55,8 @@ public static class CharacterSheetEndpoints
 
             var gear = await LatestGear(db, c.Id);
             var history = await GearHistory(db, c.Id);
+            // Whether to offer the "refresh gear" button — the endpoint enforces the same.
+            var canRefreshGear = await CanRefreshGear(db, session!, c);
 
             // Awards won by this character, newest first, with the roll that took it.
             var loot = await db.LootAwards.AsNoTracking()
@@ -151,6 +154,7 @@ public static class CharacterSheetEndpoints
                 },
                 gear,
                 gearHistory = history,
+                canRefreshGear,
                 loot,
                 rolls,
                 summary,
@@ -179,6 +183,80 @@ public static class CharacterSheetEndpoints
                 .FirstOrDefaultAsync();
             return snap is null ? Results.NotFound(new { error = "not_found" }) : Results.Json(Shape(snap));
         });
+
+        // Refresh a character's gear on demand, so it isn't frozen at the last night
+        // they raided with us. Blizzard's live equipment first (the freshest source),
+        // falling back to the character's most recent Warcraft Logs report anywhere.
+        // Owner-or-officer: a raider can refresh their own characters, officers anyone's.
+        // On success the client re-fetches the sheet, so nothing is shaped here.
+        sheet.MapPost("/refresh", async (
+            HttpContext ctx, SessionTokenService tokens, BlizzardService blizzard, WarcraftLogsService wcl) =>
+        {
+            var (session, error) = ctx.RequireSession(tokens);
+            if (error is not null) return error;
+            var db = ctx.RequestServices.GetService<AppDbContext>();
+            if (db is null) return DbUnavailable();
+
+            var (character, resolveError) = await ResolveCharacter(db, session!, ctx.Request.Query);
+            if (resolveError is not null) return resolveError;
+
+            if (!await CanRefreshGear(db, session!, character!))
+                return Results.Json(new { error = "forbidden", detail = "You can only refresh gear for your own characters." },
+                    statusCode: 403);
+
+            // ResolveCharacter reads AsNoTracking; reload tracked so the upsert (and any
+            // setup refresh on the WCL path) is persisted.
+            var ch = await db.Characters.FirstOrDefaultAsync(x => x.Id == character!.Id);
+            if (ch is null) return NotFound("No such character.");
+
+            // 1) Blizzard live gear — whatever they're wearing right now, no raid needed.
+            var (bStatus, bGear, bErr) = await blizzard.GetCharacterEquipmentAsync(ch.Name);
+            if (bStatus == 200 && bGear is not null && bGear.Items.Count > 0)
+            {
+                await GearSnapshotStore.UpsertAsync(db, ch, "blizzard", "blizzard", null,
+                    DateTimeOffset.UtcNow, bGear, refreshSetup: false);
+                await db.SaveChangesAsync();
+                return Results.Json(new { source = "blizzard", note = "Refreshed live gear from Blizzard." });
+            }
+
+            // 2) Fall back to the character's most recent Warcraft Logs report (a pug or
+            // another guild's night counts — still fresher than our last import of them).
+            var (_, report, rErr) = await wcl.GetLatestReportCodeForCharacterAsync(ch.Name);
+            if (report is not null)
+            {
+                var (_, players, _) = await wcl.GetReportGearAsync(report.Value.Code);
+                var p = players?.FirstOrDefault(x => string.Equals(x.Name, ch.Name, StringComparison.OrdinalIgnoreCase));
+                if (p is not null && p.Items.Count > 0)
+                {
+                    // Link the snapshot to a raid we already know, when the report is one.
+                    var evId = await db.RaidEvents.Where(e => e.WclReportCode == report.Value.Code)
+                        .Select(e => (Guid?)e.Id).FirstOrDefaultAsync();
+                    await GearSnapshotStore.UpsertAsync(db, ch, "wcl", report.Value.Code, evId,
+                        report.Value.StartsAt, p, refreshSetup: true);
+                    await db.SaveChangesAsync();
+                    return Results.Json(new { source = "wcl",
+                        note = "Blizzard had nothing usable — pulled the latest Warcraft Logs report instead." });
+                }
+            }
+
+            // Neither source had gear. Surface the more actionable of the two reasons.
+            var detail = bErr ?? rErr ?? "No gear could be fetched from Blizzard or Warcraft Logs.";
+            return Results.Json(new { error = "upstream", detail }, statusCode: 502);
+        });
+    }
+
+    /// <summary>Owner-or-officer: an officer may refresh anyone's gear, a raider only
+    /// the characters linked to their own Discord account. The API is the enforcement —
+    /// the sheet only uses the same answer to decide whether to show the button.</summary>
+    private static async Task<bool> CanRefreshGear(AppDbContext db, SessionPayload session, Character c)
+    {
+        if (session.Officer) return true;
+        if (c.MemberId is null) return false;
+        var ownerUid = await db.Members.AsNoTracking()
+            .Where(m => m.Id == c.MemberId)
+            .Select(m => m.DiscordUserId)
+            .FirstOrDefaultAsync();
+        return ownerUid is not null && ownerUid == session.Uid;
     }
 
     // ?id → ?name → the caller's own main (their only character when none is flagged).
@@ -237,6 +315,7 @@ public static class CharacterSheetEndpoints
             {
                 reportCode = s.WclReportCode,
                 recordedAt = s.RecordedAt,
+                source = s.Source,
                 title = s.RaidEvent != null ? s.RaidEvent.Title : null,
                 itemLevel = s.ItemLevel
             })
