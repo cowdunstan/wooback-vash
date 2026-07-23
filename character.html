@@ -79,6 +79,10 @@
     border-radius:6px;padding:4px 8px;font-family:inherit;font-size:12px;
   }
   .cs-panel-head{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
+  /* When there's no history picker, an empty .cs-picker still eats the free space
+     (margin-left:auto), so the refresh button lands on the right either way. */
+  .cs-refresh{padding:5px 12px;font-size:11.5px;align-self:center;white-space:nowrap}
+  .cs-refresh:disabled{opacity:.6;cursor:default}
 
   .cs-tiles{display:flex;flex-wrap:wrap;gap:22px;margin-bottom:12px}
   .cs-tiles div{font-size:11.5px;color:var(--text-dim)}
@@ -132,6 +136,7 @@
         <div class="cs-panel-head">
           <h2>Equipped</h2>
           <span class="cs-picker" id="gearPicker"></span>
+          <button class="btn-ghost cs-refresh" id="gearRefresh" style="display:none">Refresh gear</button>
         </div>
         <p class="cs-panel-note" id="gearNote"></p>
         <div id="gear"></div>
@@ -209,6 +214,37 @@ async function api(path){
   return body;
 }
 
+async function apiPost(path){
+  const res = await fetch(API_BASE + path, { method:'POST', headers:{ 'Authorization':'Bearer ' + sessionToken() } });
+  if(res.status === 401){ logout(); throw new Error('signed out'); }
+  const body = await res.json().catch(() => null);
+  if(!res.ok) throw new Error((body && body.detail) || ('HTTP ' + res.status));
+  return body;
+}
+
+// Pull a fresh gear snapshot (Blizzard live, else the latest Warcraft Logs report)
+// and re-render. Only wired up when the API said the viewer may — owner or officer.
+async function refreshGear(){
+  const btn = document.getElementById('gearRefresh');
+  btn.disabled = true;
+  const label = btn.textContent;
+  btn.textContent = 'Refreshing…';
+  try{
+    const res = await apiPost('/api/characters/sheet/refresh?id=' + encodeURIComponent(CURRENT_ID));
+    await load();       // re-render the sheet from the new snapshot
+    loadWowhead();
+    if(res && res.note){
+      const note = document.getElementById('gearNote');
+      note.textContent = res.note + ' ' + note.textContent;
+    }
+  }catch(err){
+    document.getElementById('gearNote').textContent = err.message;
+  }finally{
+    btn.disabled = false;
+    btn.textContent = label;
+  }
+}
+
 async function load(){
   const q = params.get('id') ? '?id=' + encodeURIComponent(params.get('id'))
           : params.get('name') ? '?name=' + encodeURIComponent(params.get('name'))
@@ -228,6 +264,7 @@ async function load(){
 
 function render(d){
   renderHead(d.character);
+  document.getElementById('gearRefresh').style.display = d.canRefreshGear ? '' : 'none';
   renderGear(d.gear, d.gearHistory);
   renderLoot(d.loot);
   renderRolls(d.rolls, d.summary);
@@ -279,15 +316,19 @@ function renderGear(gear, history){
   if(!gear){
     picker.innerHTML = '';
     note.textContent = '';
-    box.innerHTML = '<div class="cs-empty">No gear snapshot yet — gear is read from a Warcraft Logs '
-                  + 'report when an officer imports its attendance.</div>';
+    box.innerHTML = '<div class="cs-empty">No gear snapshot yet — use <b>Refresh gear</b> above to pull it '
+                  + 'from Blizzard (or the latest Warcraft Logs report), or an officer can import a raid’s '
+                  + 'attendance.</div>';
     return;
   }
 
-  // Older nights, when there are any.
+  // Older nights, when there are any. A live Blizzard snapshot reads as "Live
+  // (Blizzard)" rather than a raid title, since it isn't tied to a night.
   if(history && history.length > 1){
     picker.innerHTML = '<select id="gearSelect">' + history.map(function(h){
-      const label = fmtDate(h.recordedAt) + (h.title ? ' — ' + h.title : '');
+      const label = h.source === 'blizzard'
+        ? 'Live (Blizzard) — ' + fmtDate(h.recordedAt)
+        : fmtDate(h.recordedAt) + (h.title ? ' — ' + h.title : '');
       return '<option value="' + esc(h.reportCode) + '"' + (h.reportCode === gear.reportCode ? ' selected' : '') + '>'
            + esc(label) + '</option>';
     }).join('') + '</select>';
@@ -305,9 +346,14 @@ function renderGear(gear, history){
   }
 
   const when = fmtDate(gear.recordedAt);
-  note.innerHTML = 'As raided on ' + esc(when)
-    + (gear.title ? ' — ' + esc(gear.title) : '')
-    + ' (<a href="' + WCL_HOST + '/reports/' + esc(gear.reportCode) + '" target="_blank" rel="noopener">log</a>)'
+  // Blizzard gear is live — "as of" the refresh, with no report to link. A WCL
+  // snapshot is a raid night, so it keeps the "as raided" wording and the log link.
+  const lead = gear.source === 'blizzard'
+    ? 'Live from Blizzard, as of ' + esc(when)
+    : 'As raided on ' + esc(when)
+      + (gear.title ? ' — ' + esc(gear.title) : '')
+      + ' (<a href="' + WCL_HOST + '/reports/' + esc(gear.reportCode) + '" target="_blank" rel="noopener">log</a>)';
+  note.innerHTML = lead
     + (gear.itemLevel ? ' · item level ' + esc(gear.itemLevel) : '')
     + '. Hover an item for its tooltip.';
 
@@ -444,5 +490,6 @@ function renderAttendance(a){
 
 // loadWowhead() lives in menu.js — re-running it after a re-render (the
 // older-snapshot picker) is what attaches tooltips to the new links.
+document.getElementById('gearRefresh').addEventListener('click', refreshGear);
 load();
 </script>

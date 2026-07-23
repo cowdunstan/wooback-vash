@@ -1,14 +1,20 @@
 namespace WoobackVash.Api.Models;
 
 /// <summary>
-/// What a character was wearing on one raid night — items, enchants and gems —
-/// captured from a Warcraft Logs report when officers import its attendance.
-/// One row per (character, report), so re-importing a report updates in place.
+/// What a character was wearing — items, enchants and gems. Two things write one:
+/// the attendance import (a whole report's roster, one snapshot per raid night) and
+/// the on-demand "refresh gear" on the character sheet. One row per
+/// (character, <see cref="WclReportCode"/>), upserted in place.
 ///
-/// The log is the source because Blizzard's character-profile routes are not
-/// dependable on the Anniversary realms (the guild sync in BlizzardService uses a
-/// Game Data route, which is a different API). <see cref="Source"/> records where
-/// a snapshot came from so another source can be added without a schema change.
+/// <see cref="Source"/> records where a snapshot came from, so a source can be added
+/// without a schema change — which is exactly what the refresh does. It tries
+/// Blizzard's live character-equipment route first (source "blizzard") and falls back
+/// to the character's most recent Warcraft Logs report (source "wcl") when Blizzard
+/// fails, as its character-profile routes are the less dependable ones on the
+/// Anniversary realms. A Blizzard snapshot has no report, so it is keyed by the constant
+/// "blizzard" sentinel in <see cref="WclReportCode"/> — one continually-refreshed live
+/// row per character rather than a new one each button press. (The guild sync in
+/// BlizzardService uses a Game Data route, a different, dependable API.)
 /// </summary>
 public class CharacterGearSnapshot
 {
@@ -21,10 +27,12 @@ public class CharacterGearSnapshot
     public Guid? RaidEventId { get; set; }
     public RaidEvent? RaidEvent { get; set; }
 
-    /// <summary>Warcraft Logs report code the snapshot was read from.</summary>
+    /// <summary>The snapshot's key within a character: a Warcraft Logs report code for
+    /// a "wcl" snapshot, or the constant "blizzard" sentinel for a live Blizzard one
+    /// (which has no report). Part of the unique index with the character.</summary>
     public required string WclReportCode { get; set; }
 
-    /// <summary>Where the snapshot came from — "wcl" today.</summary>
+    /// <summary>Where the snapshot came from — "wcl" (a log) or "blizzard" (live).</summary>
     public string Source { get; set; } = "wcl";
 
     /// <summary>Spec the log reported for this character on the night.</summary>

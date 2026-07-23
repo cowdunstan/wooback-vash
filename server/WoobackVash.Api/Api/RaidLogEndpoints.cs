@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using WoobackVash.Api.Auth;
 using WoobackVash.Api.Data;
@@ -376,54 +375,17 @@ public static class RaidLogEndpoints
         var byName = new Dictionary<string, Character>(StringComparer.OrdinalIgnoreCase);
         foreach (var c in characters) byName[c.Name] = c;
 
-        var ids = characters.Select(c => c.Id).ToList();
-        var existing = await db.GearSnapshots
-            .Where(s => s.WclReportCode == code && ids.Contains(s.CharacterId))
-            .ToDictionaryAsync(s => s.CharacterId, s => s);
-
         var recordedAt = ev.StartsAt ?? DateTimeOffset.UtcNow;
-        var now = DateTimeOffset.UtcNow;
         var count = 0;
 
         foreach (var p in players)
         {
             // Only characters the attendance pass kept — a log holds pugs too.
             if (!byName.TryGetValue(p.Name, out var ch)) continue;
-            if (p.Items.Count == 0) continue;
 
-            var items = JsonSerializer.Serialize(p.Items.Select(i => new
-            {
-                slot = i.Slot,
-                id = i.Id,
-                name = i.Name,
-                icon = i.Icon,
-                quality = i.Quality,
-                ilvl = i.ItemLevel,
-                enchant = i.Enchant,
-                enchantName = i.EnchantName,
-                tempEnchant = i.TempEnchant,
-                tempEnchantName = i.TempEnchantName,
-                gems = i.Gems
-            }));
-
-            if (!existing.TryGetValue(ch.Id, out var snap))
-            {
-                snap = new CharacterGearSnapshot { CharacterId = ch.Id, WclReportCode = code };
-                db.GearSnapshots.Add(snap);
-            }
-            snap.RaidEventId = ev.Id;
-            snap.Spec = p.Spec;
-            snap.ItemLevel = p.ItemLevel;
-            snap.Items = items;
-            snap.RecordedAt = recordedAt;
-            snap.ImportedAt = now;
-            count++;
-
-            // The character's current raid setup, as last seen in a log.
-            if (!string.IsNullOrWhiteSpace(p.Spec)) ch.Spec = p.Spec;
-            if (!string.IsNullOrWhiteSpace(p.Role)) ch.Role = p.Role;
-            ch.Class ??= p.Cls;
-            if (p.Spec is not null || p.Role is not null) ch.SetupUpdatedAt = now;
+            var snap = await GearSnapshotStore.UpsertAsync(
+                db, ch, "wcl", code, ev.Id, recordedAt, p, refreshSetup: true);
+            if (snap is not null) count++;
         }
 
         await db.SaveChangesAsync();

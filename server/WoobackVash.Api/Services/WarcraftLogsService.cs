@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Options;
 using WoobackVash.Api.Config;
+using WoobackVash.Api.Models;
 
 namespace WoobackVash.Api.Services;
 
@@ -257,19 +258,8 @@ public class WarcraftLogsService
             kept, actors.Count - kept.Count), null);
     }
 
-    /// <summary>
-    /// One equipped item from a log's combatantInfo. The log names the item and its
-    /// enchants for us (the enchant name is the only place that text exists — an
-    /// enchant id is not a spell id, so nothing downstream could resolve it), but
-    /// gems come as bare item ids, which the sheet hands to Wowhead.
-    /// </summary>
-    public record GearItem(string Slot, long Id, string? Name, string? Icon, int? Quality,
-        double? ItemLevel, long? Enchant, string? EnchantName,
-        long? TempEnchant, string? TempEnchantName, List<long> Gems);
-
-    /// <summary>What one player wore on the night, plus the spec/role the log gives them.</summary>
-    public record PlayerGear(string Name, string? Realm, string? Cls, string? Spec,
-        string? Role, double? ItemLevel, List<GearItem> Items);
+    // The gear DTOs (GearItem, PlayerGear) live in Models/GearData.cs — both this
+    // service and BlizzardService produce them, and GearSnapshotStore writes them.
 
     // WoW equipment slot order as the combat log reports it (Classic has no
     // ranged-slot ammo/relic split beyond index 17). The one place this mapping lives.
@@ -340,6 +330,58 @@ public class WarcraftLogsService
             }
         }
         return (200, players, null);
+    }
+
+    /// <summary>Finds the most recent report the character appears in — anywhere,
+    /// including a pug or another guild, not just our own logs — so an on-demand gear
+    /// refresh can pull fresher gear than the last night they raided with us. The
+    /// character lives on our realm/region (from config); returns the report's code
+    /// and start time, or 404 when Warcraft Logs has no report for them. One upstream
+    /// call; <see cref="GetReportGearAsync"/> then supplies the gear.</summary>
+    public async Task<(int Status, (string Code, DateTimeOffset StartsAt)? Report, string? Error)>
+        GetLatestReportCodeForCharacterAsync(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+            return (400, null, "A character name is required.");
+
+        var token = await GetTokenAsync();
+        if (token is null)
+            return (501, null, "Warcraft Logs API credentials are not set on the server yet.");
+
+        const string query =
+            "query($name:String!,$server:String!,$region:String!){characterData{" +
+            "character(name:$name,serverSlug:$server,serverRegion:$region){" +
+            "recentReports(limit:1){data{code startTime}}}}}";
+
+        var (status, doc, err) = await PostGraphQlAsync(token, JsonSerializer.Serialize(new
+        {
+            query,
+            variables = new { name, server = _opt.GuildServer, region = _opt.GuildRegion }
+        }));
+        if (doc is null) return (status, null, err);
+        using var _doc = doc;
+
+        if (!doc.RootElement.TryGetProperty("data", out var data) ||
+            !data.TryGetProperty("characterData", out var cd) ||
+            !cd.TryGetProperty("character", out var character) ||
+            character.ValueKind != JsonValueKind.Object ||
+            !character.TryGetProperty("recentReports", out var recent) ||
+            !recent.TryGetProperty("data", out var list) ||
+            list.ValueKind != JsonValueKind.Array || list.GetArrayLength() == 0)
+        {
+            var gqlErr = TryGetGqlError(doc.RootElement);
+            return (404, null, gqlErr ?? $"Warcraft Logs has no report for \"{name}\" on {_opt.GuildServer}.");
+        }
+
+        var first = list[0];
+        var code = GetString(first, "code");
+        if (string.IsNullOrWhiteSpace(code))
+            return (404, null, $"Warcraft Logs has no report for \"{name}\" on {_opt.GuildServer}.");
+
+        // startTime is Unix milliseconds; 0 falls back to now so the snapshot still sorts.
+        var startMs = GetLong(first, "startTime");
+        var startsAt = startMs > 0 ? DateTimeOffset.FromUnixTimeMilliseconds(startMs) : DateTimeOffset.UtcNow;
+        return (200, (code, startsAt), null);
     }
 
     // "tanks"/"healers"/"dps" → the role stored on the character. Anything else is

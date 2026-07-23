@@ -6,6 +6,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.Options;
 using WoobackVash.Api.Config;
+using WoobackVash.Api.Models;
 
 namespace WoobackVash.Api.Services;
 
@@ -146,6 +147,184 @@ public class BlizzardService
         }
         return list;
     }
+
+    /* ── Live character gear ─────────────────────────────────────────────────
+       The character-equipment profile is what a gear "refresh" pulls first: it is
+       the freshest possible snapshot — whatever the character is wearing right now,
+       no raid required — where the log only ever knew the last night they raided.
+       Blizzard's character-profile routes are the less dependable ones on the
+       Anniversary realms (see CharacterGearSnapshot), which is why the caller falls
+       back to Warcraft Logs on anything but a clean 200. Not cached: a refresh is an
+       explicit request for the current state, and it is one character at a time. */
+
+    /// <summary>Pulls a character's currently equipped gear (items, enchants, gems)
+    /// from Blizzard, normalized into the same <see cref="PlayerGear"/> the log path
+    /// produces so the snapshot store and character sheet don't care which source it
+    /// came from. The equipment route carries no spec/role, so those are null. Returns
+    /// (status, gear, error); 404 when Blizzard has no such character (the signal to
+    /// fall back to Warcraft Logs), 501 when credentials aren't set.</summary>
+    public async Task<(int Status, PlayerGear? Gear, string? Error)> GetCharacterEquipmentAsync(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+            return (400, null, "A character name is required.");
+
+        var token = await GetTokenAsync();
+        if (token is null)
+            return (501, null, "Blizzard API credentials are not set on the server yet.");
+
+        var url = $"{_opt.ApiHost.TrimEnd('/')}/profile/wow/character/{_opt.RealmSlug}/" +
+                  $"{Uri.EscapeDataString(name.ToLowerInvariant())}/equipment" +
+                  $"?namespace={_opt.Namespace}&locale={_opt.Locale}";
+
+        var http = _httpFactory.CreateClient();
+        http.Timeout = TimeSpan.FromSeconds(_opt.RequestTimeoutSeconds);
+
+        using var req = new HttpRequestMessage(HttpMethod.Get, url);
+        req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+        HttpResponseMessage r;
+        try { r = await http.SendAsync(req); }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            _log.LogWarning(ex, "Blizzard equipment request failed/timed out for {Name}", name);
+            return (504, null, "Blizzard is not responding right now. Try again in a minute.");
+        }
+
+        if (r.StatusCode == HttpStatusCode.NotFound)
+            return (404, null, $"Blizzard has no character \"{name}\" on {_opt.RealmSlug}.");
+        if (r.StatusCode == (HttpStatusCode)429)
+            return (429, null, "Blizzard is rate-limiting the guild tools right now. Try again in a minute.");
+        if (r.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
+            return (502, null, "Blizzard rejected the API credentials.");
+        if (!r.IsSuccessStatusCode)
+            return (502, null, "Blizzard API returned " + (int)r.StatusCode);
+
+        try { return (200, ParseEquipment(name, await r.Content.ReadAsStringAsync()), null); }
+        catch (JsonException ex)
+        {
+            _log.LogWarning(ex, "Blizzard equipment parse failed for {Name}", name);
+            return (502, null, "Unexpected Blizzard equipment response.");
+        }
+    }
+
+    // equipped_items[] → { item:{id}, slot:{type}, quality:{type}, name,
+    // enchantments:[{ enchantment_id, display_string, enchantment_slot:{type} }],
+    // sockets:[{ item:{id} }] }. The classic profile route carries no per-item level
+    // and no icon (media needs another call), so both are left blank — the sheet omits
+    // the item-level line and names/illustrates items from Wowhead regardless. Each
+    // slot holds exactly one item (no mid-night swaps like a log), so the missing ilvl
+    // doesn't affect ordering.
+    private static PlayerGear ParseEquipment(string name, string json)
+    {
+        var items = new List<GearItem>();
+        using var doc = JsonDocument.Parse(json);
+        if (doc.RootElement.TryGetProperty("equipped_items", out var equipped) &&
+            equipped.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var e in equipped.EnumerateArray())
+            {
+                if (e.ValueKind != JsonValueKind.Object) continue;
+                var id = e.TryGetProperty("item", out var it) && it.ValueKind == JsonValueKind.Object
+                    ? GetLong(it, "id") : 0;
+                if (id <= 0) continue;
+
+                long? perm = null, temp = null;
+                string? permName = null, tempName = null;
+                if (e.TryGetProperty("enchantments", out var enchants) && enchants.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var en in enchants.EnumerateArray())
+                    {
+                        var slotType = en.TryGetProperty("enchantment_slot", out var es) &&
+                                       es.ValueKind == JsonValueKind.Object ? GetString(es, "type") : "";
+                        var enchId = GetLong(en, "enchantment_id");
+                        var display = CleanEnchant(GetString(en, "display_string"));
+                        if (slotType.Equals("TEMPORARY", StringComparison.OrdinalIgnoreCase))
+                        {
+                            temp = enchId != 0 ? enchId : temp;
+                            tempName ??= display;
+                        }
+                        else // PERMANENT (and anything else) folds into the permanent enchant
+                        {
+                            perm = enchId != 0 ? enchId : perm;
+                            permName ??= display;
+                        }
+                    }
+                }
+
+                var gems = new List<long>();
+                if (e.TryGetProperty("sockets", out var sockets) && sockets.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var s in sockets.EnumerateArray())
+                    {
+                        var gemId = s.TryGetProperty("item", out var gi) && gi.ValueKind == JsonValueKind.Object
+                            ? GetLong(gi, "id") : 0;
+                        if (gemId > 0) gems.Add(gemId);
+                    }
+                }
+
+                // Newer expansions expose level.value here; the classic route omits it,
+                // so this stays null and the sheet simply shows no item level.
+                double? ilvl = e.TryGetProperty("level", out var lvl) && lvl.ValueKind == JsonValueKind.Object
+                    ? GetDouble(lvl, "value") : 0;
+                if (ilvl == 0) ilvl = null;
+
+                items.Add(new GearItem(
+                    SlotName(e),
+                    id,
+                    NullIfEmpty(GetString(e, "name")),
+                    null,
+                    QualityRank(e),
+                    ilvl,
+                    perm, permName, temp, tempName, gems));
+            }
+        }
+
+        // Average item level: the mean of the rated pieces, matching the log path's
+        // fallback (0-ilvl entries like a tabard would only drag it down).
+        double? avg = null;
+        var rated = items.Where(i => i.ItemLevel is > 0).Select(i => i.ItemLevel!.Value).ToList();
+        if (rated.Count > 0) avg = Math.Round(rated.Average(), 1);
+
+        return new PlayerGear(name, null, null, null, null, avg, items);
+    }
+
+    // Blizzard slot types (HEAD, MAIN_HAND, FINGER_1, …) fold to the lowercase,
+    // underscore-free slot names the character sheet and item pages key on
+    // (head, mainhand, finger1, …).
+    private static string SlotName(JsonElement item) =>
+        item.TryGetProperty("slot", out var slot) && slot.ValueKind == JsonValueKind.Object
+            ? GetString(slot, "type").ToLowerInvariant().Replace("_", "")
+            : "unknown";
+
+    // quality.type (POOR…HEIRLOOM) → the 0-based rank the log path stores.
+    private static int? QualityRank(JsonElement item)
+    {
+        if (!item.TryGetProperty("quality", out var q) || q.ValueKind != JsonValueKind.Object) return null;
+        return GetString(q, "type").ToUpperInvariant() switch
+        {
+            "POOR" => 0,
+            "COMMON" => 1,
+            "UNCOMMON" => 2,
+            "RARE" => 3,
+            "EPIC" => 4,
+            "LEGENDARY" => 5,
+            "ARTIFACT" => 6,
+            "HEIRLOOM" => 7,
+            _ => null
+        };
+    }
+
+    // Blizzard prefixes an enchant string with a label ("Enchanted: +26 …"); drop it
+    // so the sheet reads like the log's bare enchant name.
+    private static string? CleanEnchant(string s)
+    {
+        s = s.Trim();
+        var colon = s.IndexOf(": ", StringComparison.Ordinal);
+        if (colon >= 0 && colon <= 12) s = s[(colon + 2)..].Trim();
+        return string.IsNullOrWhiteSpace(s) ? null : s;
+    }
+
+    private static string? NullIfEmpty(string s) => string.IsNullOrWhiteSpace(s) ? null : s;
 
     private async Task<string?> GetTokenAsync()
     {
@@ -362,4 +541,10 @@ public class BlizzardService
 
     private static int GetInt(JsonElement e, string prop) =>
         e.TryGetProperty(prop, out var v) && v.ValueKind == JsonValueKind.Number && v.TryGetInt32(out var n) ? n : 0;
+
+    private static long GetLong(JsonElement e, string prop) =>
+        e.TryGetProperty(prop, out var v) && v.ValueKind == JsonValueKind.Number && v.TryGetInt64(out var n) ? n : 0;
+
+    private static double GetDouble(JsonElement e, string prop) =>
+        e.TryGetProperty(prop, out var v) && v.ValueKind == JsonValueKind.Number && v.TryGetDouble(out var n) ? n : 0;
 }
